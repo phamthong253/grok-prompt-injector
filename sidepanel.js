@@ -1912,6 +1912,13 @@ async function runShortFilm() {
     sfSetSceneStatus(scene.id, 'running');
     $(`sf-scene-${scene.id}`)?.scrollIntoView({ behavior:'smooth', block:'nearest' });
 
+    // ★ Scroll page to bottom & ensure clean input for next scene
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => { window.scrollTo(0, document.body.scrollHeight); },
+    });
+    await sleep(500);
+
     // Build full prompt
     const shotLine   = `[SHOT] ${scene.shot}. [CAMERA] ${scene.camera}.`;
     const sceneLabel = `[SCENE ${i+1}${scene.title ? ' — ' + scene.title : ''}]`;
@@ -1922,18 +1929,20 @@ async function runShortFilm() {
     addLog(sfLogEl, `  Prompt: ${scene.prompt.slice(0,55)}...`);
     setStatus(`🎬 Cảnh ${i+1}/${sfScenes.length}`, 'orange');
 
-    // Step A0: Inject character reference images (only for first scene or when not chaining)
+    // Step A0: Inject character reference images (only for first scene)
     const charRefs = sfCharacters.filter(c => c.imageDataUrl);
-    if (charRefs.length > 0 && (i === 0 || !doChain || !prevFrameDataUrl)) {
+    if (charRefs.length > 0 && i === 0) {
       addLog(sfLogEl, `  📷 Inject ${charRefs.length} ảnh reference nhân vật...`, 'chain');
       for (const ch of charRefs) {
         const fname = `char_${slugify(ch.name || 'ref')}_${ch.id}.jpg`;
         const res = await injectImageToPage(tab.id, ch.imageDataUrl, 'image/jpeg', fname);
         if (res.ok) addLog(sfLogEl, `    ✓ ${ch.name || 'Nhân vật'}: ảnh ref đã gán`, 'ok');
         else        addLog(sfLogEl, `    ⚠ ${ch.name || 'Nhân vật'}: ${res.error}`, 'warn');
-        await sleep(500);
+        await sleep(1000);
       }
-      await sleep(800); // Wait for UI to stabilize after images
+      // ★ Wait for Grok to fully process uploaded images
+      addLog(sfLogEl, `  ⏳ Chờ Grok xử lý ảnh...`);
+      await sleep(2000);
     }
 
     // Step A: Inject reference frame (chaining)
@@ -1945,13 +1954,13 @@ async function runShortFilm() {
       if (imgRes.ok) { addLog(sfLogEl, `  ✓ Reference frame đã gán`, 'ok'); }
       else           { addLog(sfLogEl, `  ⚠ Không gán được ref: ${imgRes.error}`, 'warn'); }
       sfSetSceneStatus(scene.id, 'running');
-      await sleep(800);
+      await sleep(1500); // ★ Wait longer for image processing
     }
 
     // Snapshot BEFORE submit (like Img2Vid)
     const knownVids = await snapshotVideoUrls(tab.id);
 
-    // Step B: Inject prompt + submit (exact same pattern as Img2Vid which works)
+    // Step B: Inject prompt + submit
     addLog(sfLogEl, `  ✍ Inject prompt + submit...`);
     await sleep(800);
     try {
