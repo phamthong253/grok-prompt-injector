@@ -461,8 +461,10 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
             }
           }
           // 2. Find submit button inside form — target bottom-right action bar (Grok 2025)
-          const forms = document.querySelectorAll('form');
-          console.log(`[GPI]   forms found: ${forms.length}`);
+          const rootForm = el.closest('form');
+          const allForms = Array.from(document.querySelectorAll('form'));
+          const forms = rootForm ? [rootForm, ...allForms.filter(f => f !== rootForm)] : allForms;
+          console.log(`[GPI]   forms found: ${forms.length}, rootFirst=${!!rootForm}`);
           for (const form of forms) {
             // Target specifically the bottom-right absolute div (exact Grok layout)
             const allAbsDivs = Array.from(form.querySelectorAll('div.absolute'));
@@ -520,19 +522,49 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
 }
 
 // ── INJECT IMAGE FILE ─────────────────────────────────────────────────────────
-async function injectImageToPage(tabId, dataUrl, mimeType, fileName) {
+async function injectImageToPage(tabId, dataUrl, mimeType, fileName, options = {}) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async (dataUrl, mimeType, fileName) => {
+    func: async (dataUrl, mimeType, fileName, options) => {
       console.log('[GPI] injectImageToPage START', { fileName, mimeType, dataUrlLen: dataUrl?.length });
       const res = await fetch(dataUrl);
       const blob = await res.blob();
       const file = new File([blob], fileName, { type: mimeType });
       console.log('[GPI] File created:', file.name, file.size, 'bytes');
 
-      let fileInput = document.querySelector('input[type="file"][accept*="image"]')
-        || document.querySelector('input[type="file"]');
-      console.log('[GPI] fileInput found (initial):', !!fileInput, fileInput?.accept);
+      const visible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const st = window.getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none';
+      };
+
+      const findComposerRoot = () => {
+        const promptNodes = Array.from(document.querySelectorAll(
+          'textarea[placeholder*="Imagine" i],textarea[placeholder*="Describe" i],textarea[placeholder*="Enter" i],div[contenteditable="true"][data-lexical-editor],div[contenteditable="true"]'
+        )).filter(visible);
+        const active = promptNodes[0] || document.activeElement;
+        return active ? (active.closest('form') || active.closest('[data-testid*="composer" i],[class*="composer" i]') || document.body) : document.body;
+      };
+
+      const pickFileInput = () => {
+        const all = Array.from(document.querySelectorAll('input[type="file"]'));
+        const imageOnly = all.filter(i => (i.accept || '').toLowerCase().includes('image'));
+        const pool = imageOnly.length ? imageOnly : all;
+        if (!pool.length) return null;
+
+        if (options && options.preferComposer) {
+          const root = findComposerRoot();
+          const inRoot = pool.filter(i => root.contains(i));
+          if (inRoot.length) return inRoot[inRoot.length - 1];
+        }
+
+        const visibleFirst = pool.find(visible);
+        return visibleFirst || pool[pool.length - 1];
+      };
+
+      let fileInput = pickFileInput();
+      console.log('[GPI] fileInput found (initial):', !!fileInput, fileInput?.accept, 'preferComposer=', !!options?.preferComposer);
 
       if (!fileInput) {
         console.log('[GPI] No file input, trying trigger buttons...');
@@ -548,8 +580,7 @@ async function injectImageToPage(tabId, dataUrl, mimeType, fileName) {
             btn.click(); await new Promise(r => setTimeout(r, 600)); break;
           }
         }
-        fileInput = document.querySelector('input[type="file"][accept*="image"]')
-          || document.querySelector('input[type="file"]');
+        fileInput = pickFileInput();
         console.log('[GPI] fileInput found (after trigger):', !!fileInput);
       }
 
@@ -562,7 +593,7 @@ async function injectImageToPage(tabId, dataUrl, mimeType, fileName) {
       console.log('[GPI] ✅ Image injected OK');
       return { ok: true };
     },
-    args: [dataUrl, mimeType, fileName],
+    args: [dataUrl, mimeType, fileName, options],
   });
   const imgResult = results?.[0]?.result || { ok: false, error: 'Script thất bại' };
   console.log('[GPI-sidepanel] injectImageToPage result:', imgResult);
@@ -1999,68 +2030,69 @@ async function runShortFilm() {
     if (sfStopReq) { addLog(sfLogEl, `⏹ Dừng tại cảnh ${i+1}`, 'warn'); break; }
 
     const scene = sfScenes[i];
-    sfSetSceneStatus(scene.id, 'running');
-    $(`sf-scene-${scene.id}`)?.scrollIntoView({ behavior:'smooth', block:'nearest' });
-
-    console.log(`[GPI-SF] ═══ SCENE ${i+1}/${sfScenes.length} ═══`, scene.title || '');
-
-    // ★ Scroll page to bottom & ensure clean input for next scene
-    console.log('[GPI-SF] Scrolling page to bottom...');
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        console.log('[GPI] scrollTo bottom, body.scrollHeight:', document.body.scrollHeight);
-        window.scrollTo(0, document.body.scrollHeight);
-      },
-    });
-    await sleep(500);
-
-    // Build full prompt
-    const shotLine   = `[SHOT] ${scene.shot}. [CAMERA] ${scene.camera}.`;
-    const sceneLabel = `[SCENE ${i+1}${scene.title ? ' — ' + scene.title : ''}]`;
-    const fullPrompt = `${anchor}\n${shotLine}\n${sceneLabel} ${scene.prompt.trim()}`;
-
-    console.log('[GPI-SF] fullPrompt length:', fullPrompt.length);
-    addLog(sfLogEl, `\n▶ CẢNH ${i+1}${scene.title ? ' — ' + scene.title : ''}`, 'ok');
-    addLog(sfLogEl, `  Shot: ${scene.shot} | Cam: ${scene.camera}`);
-    addLog(sfLogEl, `  Prompt: ${scene.prompt.slice(0,55)}...`);
-    setStatus(`🎬 Cảnh ${i+1}/${sfScenes.length}`, 'orange');
-
-    // Step A0: Inject character reference images (only for first scene)
-    const charRefs = sfCharacters.filter(c => c.imageDataUrl);
-    if (charRefs.length > 0 && i === 0) {
-      addLog(sfLogEl, `  📷 Inject ${charRefs.length} ảnh reference nhân vật...`, 'chain');
-      for (const ch of charRefs) {
-        const fname = `char_${slugify(ch.name || 'ref')}_${ch.id}.jpg`;
-        const res = await injectImageToPage(tab.id, ch.imageDataUrl, 'image/jpeg', fname);
-        if (res.ok) addLog(sfLogEl, `    ✓ ${ch.name || 'Nhân vật'}: ảnh ref đã gán`, 'ok');
-        else        addLog(sfLogEl, `    ⚠ ${ch.name || 'Nhân vật'}: ${res.error}`, 'warn');
-        await sleep(1000);
-      }
-      // ★ Wait for Grok to fully process uploaded images
-      addLog(sfLogEl, `  ⏳ Chờ Grok xử lý ảnh...`);
-      await sleep(2000);
-    }
-
-    // Step A: Inject reference frame (chaining)
-    const refDataUrl = (doChain && prevFrameDataUrl) ? prevFrameDataUrl : scene.chainDataUrl;
-    if (refDataUrl) {
-      sfSetSceneStatus(scene.id, 'chaining');
-      addLog(sfLogEl, `  🔗 Inject reference frame...`, 'chain');
-      const imgRes = await injectImageToPage(tab.id, refDataUrl, 'image/jpeg', `ref_scene_${i+1}.jpg`);
-      if (imgRes.ok) { addLog(sfLogEl, `  ✓ Reference frame đã gán`, 'ok'); }
-      else           { addLog(sfLogEl, `  ⚠ Không gán được ref: ${imgRes.error}`, 'warn'); }
-      sfSetSceneStatus(scene.id, 'running');
-      await sleep(1500); // ★ Wait longer for image processing
-    }
-
-    // Snapshot BEFORE submit (like Img2Vid)
-    const knownVids = await snapshotVideoUrls(tab.id);
-
-    // Step B: Inject prompt + submit
-    addLog(sfLogEl, `  ✍ Inject prompt + submit...`);
-    await sleep(800);
     try {
+      sfSetSceneStatus(scene.id, 'running');
+      $(`sf-scene-${scene.id}`)?.scrollIntoView({ behavior:'smooth', block:'nearest' });
+
+      console.log(`[GPI-SF] ═══ SCENE ${i+1}/${sfScenes.length} ═══`, scene.title || '');
+
+      // ★ Scroll page to bottom & ensure clean input for next scene
+      console.log('[GPI-SF] Scrolling page to bottom...');
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          console.log('[GPI] scrollTo bottom, body.scrollHeight:', document.body.scrollHeight);
+          window.scrollTo(0, document.body.scrollHeight);
+        },
+      });
+      await sleep(500);
+
+      // Build full prompt
+      const shotLine   = `[SHOT] ${scene.shot}. [CAMERA] ${scene.camera}.`;
+      const sceneLabel = `[SCENE ${i+1}${scene.title ? ' — ' + scene.title : ''}]`;
+      const fullPrompt = `${anchor}
+${shotLine}
+${sceneLabel} ${scene.prompt.trim()}`;
+
+      console.log('[GPI-SF] fullPrompt length:', fullPrompt.length);
+      addLog(sfLogEl, `
+▶ CẢNH ${i+1}${scene.title ? ' — ' + scene.title : ''}`, 'ok');
+      addLog(sfLogEl, `  Shot: ${scene.shot} | Cam: ${scene.camera}`);
+      addLog(sfLogEl, `  Prompt: ${scene.prompt.slice(0,55)}...`);
+      setStatus(`🎬 Cảnh ${i+1}/${sfScenes.length}`, 'orange');
+
+      // Step A0: Inject character reference images (only for first scene)
+      const charRefs = sfCharacters.filter(c => c.imageDataUrl);
+      if (charRefs.length > 0 && i === 0) {
+        addLog(sfLogEl, `  📷 Inject ${charRefs.length} ảnh reference nhân vật...`, 'chain');
+        for (const ch of charRefs) {
+          const fname = `char_${slugify(ch.name || 'ref')}_${ch.id}.jpg`;
+          const res = await injectImageToPage(tab.id, ch.imageDataUrl, 'image/jpeg', fname, { preferComposer: true });
+          if (res.ok) addLog(sfLogEl, `    ✓ ${ch.name || 'Nhân vật'}: ảnh ref đã gán`, 'ok');
+          else        addLog(sfLogEl, `    ⚠ ${ch.name || 'Nhân vật'}: ${res.error}`, 'warn');
+          await sleep(1000);
+        }
+        addLog(sfLogEl, `  ⏳ Chờ Grok xử lý ảnh...`);
+        await sleep(2000);
+      }
+
+      // Step A: Inject reference frame (chaining)
+      const refDataUrl = (doChain && prevFrameDataUrl) ? prevFrameDataUrl : scene.chainDataUrl;
+      if (refDataUrl) {
+        sfSetSceneStatus(scene.id, 'chaining');
+        addLog(sfLogEl, `  🔗 Inject reference frame...`, 'chain');
+        const imgRes = await injectImageToPage(tab.id, refDataUrl, 'image/jpeg', `ref_scene_${i+1}.jpg`, { preferComposer: true });
+        if (imgRes.ok) { addLog(sfLogEl, `  ✓ Reference frame đã gán`, 'ok'); }
+        else           { addLog(sfLogEl, `  ⚠ Không gán được ref: ${imgRes.error}`, 'warn'); }
+        sfSetSceneStatus(scene.id, 'running');
+        await sleep(1500);
+      }
+
+      const knownVids = await snapshotVideoUrls(tab.id);
+
+      // Step B: Inject prompt + submit
+      addLog(sfLogEl, `  ✍ Inject prompt + submit...`);
+      await sleep(800);
       const txtRes = await injectTextPrompt(tab.id, fullPrompt, true);
       if (!txtRes.ok) {
         addLog(sfLogEl, `  ✗ ${txtRes.error}`, 'err');
@@ -2069,70 +2101,82 @@ async function runShortFilm() {
         continue;
       }
       addLog(sfLogEl, `  ✓ Đã submit (${txtRes.method || 'ok'})`, 'ok');
-    } catch (e) {
-      addLog(sfLogEl, `  ✗ ${e.message}`, 'err');
-      sfSetSceneStatus(scene.id, 'error');
-      continue;
-    }
 
-    // Step C: Wait for generate
-    if (doWait) {
-      setStatus(`⏳ Chờ generate cảnh ${i+1}...`, 'orange');
-      addLog(sfLogEl, `  ⏳ Chờ Grok generate...`);
-      await sleep(2000);
-      const gen = await waitForGenerate(tab.id, tmOut, knownVids,
-        () => sfStopReq,
-        (pct) => { /* progress optional */ }
-      );
-      if (!gen.ok) {
-        const reason = gen.reason === 'timeout' ? 'Timeout' : 'Đã dừng';
-        addLog(sfLogEl, `  ⚠ ${reason}`, 'warn');
-        sfSetSceneStatus(scene.id, gen.reason === 'timeout' ? 'timeout' : 'idle');
-        if (gen.reason === 'stopped') break;
-        continue;
-      }
-      addLog(sfLogEl, `  ✅ Generate xong!`, 'ok');
-
-      // Step D: Capture last frame for chaining
-      if (doChain) {
-        addLog(sfLogEl, `  📸 Capture frame cuối...`, 'chain');
-        const capture = await captureLastFrame(tab.id);
-        if (capture.ok) {
-          prevFrameDataUrl      = capture.dataUrl;
-          scene.genFrameDataUrl = capture.dataUrl;
-          const genFrameEl = $(`sf-genframe-${scene.id}`);
-          const genImgEl   = $(`sf-genimg-${scene.id}`);
-          if (genFrameEl && genImgEl) { genImgEl.src = capture.dataUrl; genFrameEl.classList.add('show'); }
-          addLog(sfLogEl, `  🔗 Frame captured → sẽ dùng cho cảnh ${i+2}`, 'chain');
+      let generatedOk = true;
+      if (doWait) {
+        setStatus(`⏳ Chờ generate cảnh ${i+1}...`, 'orange');
+        addLog(sfLogEl, `  ⏳ Chờ Grok generate...`);
+        await sleep(2000);
+        const gen = await waitForGenerate(tab.id, tmOut, knownVids,
+          () => sfStopReq,
+          () => {}
+        );
+        if (!gen.ok) {
+          const reason = gen.reason === 'timeout' ? 'Timeout' : 'Đã dừng';
+          addLog(sfLogEl, `  ⚠ ${reason}`, 'warn');
+          sfSetSceneStatus(scene.id, gen.reason === 'timeout' ? 'timeout' : 'idle');
+          if (gen.reason === 'stopped') break;
+          generatedOk = false;
         } else {
-          addLog(sfLogEl, `  ⚠ Capture thất bại: ${capture.error}`, 'warn');
-          prevFrameDataUrl = null;
+          addLog(sfLogEl, `  ✅ Generate xong!`, 'ok');
+        }
+
+        if (generatedOk && doChain) {
+          addLog(sfLogEl, `  📸 Capture frame cuối...`, 'chain');
+          const capture = await captureLastFrame(tab.id);
+          if (capture.ok) {
+            prevFrameDataUrl      = capture.dataUrl;
+            scene.genFrameDataUrl = capture.dataUrl;
+            const genFrameEl = $(`sf-genframe-${scene.id}`);
+            const genImgEl   = $(`sf-genimg-${scene.id}`);
+            if (genFrameEl && genImgEl) { genImgEl.src = capture.dataUrl; genFrameEl.classList.add('show'); }
+            addLog(sfLogEl, `  🔗 Frame captured → sẽ dùng cho cảnh ${i+2}`, 'chain');
+          } else {
+            addLog(sfLogEl, `  ⚠ Capture thất bại: ${capture.error}`, 'warn');
+            prevFrameDataUrl = null;
+          }
         }
       }
 
-      // Step E: Download
-      if (doDL) {
+      // Step E: Download independent from doWait. Retry to avoid late URL hydration.
+      if (doDL && generatedOk) {
         setStatus(`⬇ Tải cảnh ${i+1}...`, 'orange');
         const knownImgs = await snapshotImageUrls(tab.id);
         const sceneSlug = `scene${String(i+1).padStart(2,'0')}_${slugify(scene.title||scene.prompt)}`;
-        const files = await downloadMedia(tab.id, sceneSlug, 'video', knownVids, knownImgs);
-        downloadHistory.push(...files.map(f => ({ ...f, prompt: `Cảnh ${i+1}: ${scene.prompt.slice(0,40)}` })));
-        downloadedFiles.push(...files);
-        renderDownloads();
+        let files = [];
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          files = await downloadMedia(tab.id, sceneSlug, 'video', knownVids, knownImgs);
+          if (files.length > 0) break;
+          if (attempt < 3) {
+            addLog(sfLogEl, `  ⏳ Chờ media ổn định (${attempt}/3)...`, 'warn');
+            await sleep(1500);
+          }
+        }
+        if (files.length === 0) {
+          addLog(sfLogEl, `  ⚠ Chưa tải được video mới cho cảnh ${i+1}`, 'warn');
+        } else {
+          downloadHistory.push(...files.map(f => ({ ...f, prompt: `Cảnh ${i+1}: ${scene.prompt.slice(0,40)}` })));
+          downloadedFiles.push(...files);
+          renderDownloads();
+        }
       }
-    }
 
-    sfSetSceneStatus(scene.id, 'done');
-    done++;
-    setProgress(sfProgBar, sfProgLabel, done, sfScenes.length, 'Cảnh xong');
-    saveScenes();
+      sfSetSceneStatus(scene.id, 'done');
+      done++;
+      setProgress(sfProgBar, sfProgLabel, done, sfScenes.length, 'Cảnh xong');
+      saveScenes();
 
-    if (i < sfScenes.length - 1 && !sfStopReq) {
-      setStatus(`⏱ Chờ ${delay}ms...`, 'orange');
-      await sleep(delay);
+      if (i < sfScenes.length - 1 && !sfStopReq) {
+        setStatus(`⏱ Chờ ${delay}ms...`, 'orange');
+        await sleep(delay);
+      }
+    } catch (e) {
+      addLog(sfLogEl, `  ✗ Lỗi cảnh ${i+1}: ${e.message}`, 'err');
+      sfSetSceneStatus(scene.id, 'error');
+      $(`sf-serr-${scene.id}`).textContent = `⚠ Runtime error: ${e.message}`;
+      continue;
     }
   }
-
   sfIsRunning = false;
   sfRunBtn.disabled = false; sfStopBtn.disabled = true;
   const allSfOk = done === sfScenes.length;
