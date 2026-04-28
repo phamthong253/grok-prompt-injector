@@ -432,31 +432,57 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
       return new Promise(resolve => {
         let attempts = 0;
         let submitted = false;
-        const btnsels = [
-          'button[aria-label*="Grok"]', 'button[aria-label*="Send"]',
-          'button[aria-label*="Generate"]', 'button[type="submit"]',
-          'button[data-testid*="send"]', 'button[data-testid*="submit"]',
-        ];
         const tryClick = () => {
           if (submitted) return;
+
+          // 1. Try aria-label selectors (legacy Grok versions)
+          const btnsels = [
+            'button[aria-label*="Grok"]', 'button[aria-label*="Send"]',
+            'button[aria-label*="Generate"]', 'button[type="submit"]',
+            'button[data-testid*="send"]', 'button[data-testid*="submit"]',
+          ];
           for (const s of btnsels) {
             const b = document.querySelector(s);
             if (b && !b.disabled) {
               b.click(); submitted = true;
-              resolve({ ok: true, method: 'button' }); return;
+              resolve({ ok: true, method: 'aria-button' }); return;
             }
           }
-          if (++attempts >= 20) {
+
+          // 2. Find submit button inside form (current Grok 2025 layout)
+          const forms = document.querySelectorAll('form');
+          for (const form of forms) {
+            // Look for the button in the absolute-positioned action bar
+            const actionBtns = form.querySelectorAll('div.absolute button');
+            for (const b of actionBtns) {
+              if (!b.disabled && b.querySelector('svg')) {
+                b.click(); submitted = true;
+                resolve({ ok: true, method: 'form-svg-button' }); return;
+              }
+            }
+            // Fallback: any button inside form that's not disabled
+            const allFormBtns = form.querySelectorAll('button:not([disabled])');
+            if (allFormBtns.length > 0) {
+              const btn = allFormBtns[allFormBtns.length - 1]; // last button is usually submit
+              btn.click(); submitted = true;
+              resolve({ ok: true, method: 'form-last-button' }); return;
+            }
+          }
+
+          // 3. Last resort: Enter key
+          if (++attempts >= 15) {
             if (!submitted) {
+              el.focus();
               el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
+              el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
               submitted = true;
             }
-            resolve({ ok: true, method: 'keydown-fallback' });
+            resolve({ ok: true, method: 'enter-fallback' });
           } else {
-            setTimeout(tryClick, 150);
+            setTimeout(tryClick, 200);
           }
         };
-        setTimeout(tryClick, 500);
+        setTimeout(tryClick, 300);
       });
     },
     args: [prompt, doSubmit],
