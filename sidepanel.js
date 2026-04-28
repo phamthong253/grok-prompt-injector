@@ -653,23 +653,29 @@ async function waitForGenerate(tabId, timeoutMs, knownVideoUrls = new Set(), sto
   const start = Date.now();
   let lastSpinnerTime = Date.now();
   let simulatedPct = 10;
+  let btnWasDisabled = false;
+  const knownImageSnapshot = await snapshotImageUrls(tabId); // also track images
+
+  console.log('[GPI-SF] waitForGenerate START, timeout:', timeoutMs, 'knownVids:', knownVideoUrls.size, 'knownImgs:', knownImageSnapshot.size);
 
   while (Date.now() - start < timeoutMs) {
     if (stopFlagFn()) return { ok: false, reason: 'stopped' };
 
-    // Read real Grok progress
     const grokPct = await readGrokProgress(tabId);
+    const elapsed = Date.now() - start;
 
     const result = await chrome.scripting.executeScript({
       target: { tabId },
-      func: (knownUrlsArr) => {
+      func: (knownUrlsArr, knownImgArr) => {
         const knownUrls = new Set(knownUrlsArr);
+        const knownImgs = new Set(knownImgArr);
 
         const spinners = Array.from(document.querySelectorAll(
           '[class*="loading"],[class*="spinner"],[class*="generating"],[aria-busy="true"],' +
-          '[aria-label*="loading"],[aria-label*="Loading"]'
+          '[aria-label*="loading"],[aria-label*="Loading"],[class*="skeleton"],[class*="pending"]'
         )).filter(s => { const r = s.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
 
+        // Detect new videos
         const newVideoUrls = [];
         document.querySelectorAll('video').forEach(v => {
           if (v.src && !knownUrls.has(v.src)) newVideoUrls.push(v.src);
@@ -678,41 +684,85 @@ async function waitForGenerate(tabId, timeoutMs, knownVideoUrls = new Set(), sto
           });
         });
 
-        const genBtns = Array.from(document.querySelectorAll(
+        // Detect new images (for image generation mode)
+        const newImgUrls = Array.from(document.querySelectorAll('img'))
+          .map(img => img.currentSrc || img.src)
+          .filter(src => src && !knownImgs.has(src) && !src.startsWith('data:') && !src.startsWith('blob:data'));
+
+        // Download button appeared
+        const dlReady = Array.from(document.querySelectorAll(
+          'a[download],button[aria-label*="Download"],button[aria-label*="download"]'
+        )).some(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+
+        // Submit button ready — use form-based detection matching actual Grok layout
+        const forms = document.querySelectorAll('form');
+        let formBtnReady = false;
+        for (const form of forms) {
+          const actionBtns = form.querySelectorAll('div.absolute button');
+          for (const b of actionBtns) {
+            if (!b.disabled && b.querySelector('svg')) { formBtnReady = true; break; }
+          }
+          if (!formBtnReady) {
+            const allFormBtns = form.querySelectorAll('button:not([disabled])');
+            if (allFormBtns.length > 0) { formBtnReady = true; }
+          }
+          if (formBtnReady) break;
+        }
+        // Legacy selectors
+        const legacyBtns = Array.from(document.querySelectorAll(
           'button[type="submit"],button[aria-label*="Generate"],button[aria-label*="Grok"],button[aria-label*="Send"]'
         )).filter(b => !b.disabled);
+        const genReady = formBtnReady || legacyBtns.length > 0;
+        const anyBtnExists = forms.length > 0 || legacyBtns.length > 0;
+        const btnDisabled = anyBtnExists && !genReady;
 
-        return { spinners: spinners.length, hasNewVideo: newVideoUrls.length > 0, genReady: genBtns.length > 0 };
+        return { spinners: spinners.length, hasNewVideo: newVideoUrls.length > 0, newImgUrls, genReady, btnDisabled, dlReady };
       },
-      args: [[...knownVideoUrls]]
+      args: [[...knownVideoUrls], [...knownImageSnapshot]]
     });
 
     const r = result?.[0]?.result;
     if (r) {
       if (r.spinners > 0) lastSpinnerTime = Date.now();
+      if (r.btnDisabled) btnWasDisabled = true;
+      const silentMs = Date.now() - lastSpinnerTime;
 
-      // Update progress bar
+      console.log(`[GPI-SF] poll: spinners=${r.spinners} newVideo=${r.hasNewVideo} newImgs=${r.newImgUrls?.length} dlReady=${r.dlReady} genReady=${r.genReady} btnDisabled=${r.btnDisabled} silent=${Math.round(silentMs/1000)}s elapsed=${Math.round(elapsed/1000)}s`);
+
       if (progressCallback) {
-        if (grokPct !== null) {
-          progressCallback(grokPct);
-        } else {
-          // Simulate smooth progress if Grok doesn't expose it
-          const elapsed = Date.now() - start;
-          simulatedPct = Math.min(95, 10 + (elapsed / Math.min(timeoutMs, 90000)) * 82);
-          progressCallback(simulatedPct);
-        }
+        if (grokPct !== null) progressCallback(grokPct);
+        else { simulatedPct = Math.min(95, 10 + (elapsed / Math.min(timeoutMs, 90000)) * 82); progressCallback(simulatedPct); }
       }
 
-      if (r.hasNewVideo) return { ok: true };
+      // ── Completion signals ─────────────────────────────────────────────
+      // 1. New video appeared
+      if (r.hasNewVideo) { console.log('[GPI-SF] ✅ Done: new video detected'); return { ok: true, reason: 'new-video' }; }
 
-      const silentMs = Date.now() - lastSpinnerTime;
-      if (silentMs > 8000 && r.genReady && (Date.now() - start) > 15000) {
-        return { ok: true, reason: 'fallback' };
+      // 2. New image appeared (image mode)
+      if (r.newImgUrls?.length > 0 && elapsed > 5000) {
+        console.log('[GPI-SF] ✅ Done: new image detected', r.newImgUrls.length);
+        return { ok: true, reason: 'new-image' };
+      }
+
+      // 3. Download button appeared
+      if (r.dlReady && elapsed > 8000) { console.log('[GPI-SF] ✅ Done: download btn'); return { ok: true, reason: 'dl-btn' }; }
+
+      // 4. Spinner gone + button re-enabled (transition: disabled→enabled)
+      if (btnWasDisabled && r.genReady && silentMs > 5000 && elapsed > 10000) {
+        console.log('[GPI-SF] ✅ Done: btn transition disabled→enabled, silent', silentMs);
+        return { ok: true, reason: 'btn-transition' };
+      }
+
+      // 5. Long silence (no spinners) + button ready
+      if (silentMs > 12000 && r.genReady && elapsed > 15000) {
+        console.log('[GPI-SF] ✅ Done: long silence fallback');
+        return { ok: true, reason: 'silence-fallback' };
       }
     }
 
     await sleep(pollInterval);
   }
+  console.log('[GPI-SF] ⏰ waitForGenerate TIMEOUT');
   return { ok: false, reason: 'timeout' };
 }
 
