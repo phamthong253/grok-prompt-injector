@@ -460,29 +460,40 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
               resolve({ ok: true, method: 'aria-button', sel: s }); return;
             }
           }
-
-          // 2. Find submit button inside form (current Grok 2025 layout)
+          // 2. Find submit button inside form — target bottom-right action bar (Grok 2025)
           const forms = document.querySelectorAll('form');
           console.log(`[GPI]   forms found: ${forms.length}`);
           for (const form of forms) {
-            const actionBtns = form.querySelectorAll('div.absolute button');
-            console.log(`[GPI]   form actionBtns: ${actionBtns.length}`);
-            for (const b of actionBtns) {
-              const hasSvg = !!b.querySelector('svg');
-              console.log(`[GPI]     btn disabled=${b.disabled} hasSvg=${hasSvg} class="${b.className.slice(0,60)}"`);
-              if (!b.disabled && hasSvg) {
-                console.log('[GPI] ✅ CLICK form-svg-button');
-                b.click(); submitted = true;
-                resolve({ ok: true, method: 'form-svg-button' }); return;
+            // Target specifically the bottom-right absolute div (exact Grok layout)
+            const allAbsDivs = Array.from(form.querySelectorAll('div.absolute'));
+            const bottomRightDivs = allAbsDivs.filter(d => {
+              const cls = d.className || '';
+              return cls.includes('right-') && cls.includes('bottom-');
+            });
+            console.log(`[GPI]   bottomRightDivs: ${bottomRightDivs.length}`);
+            for (const div of bottomRightDivs) {
+              const btns = Array.from(div.querySelectorAll('button'));
+              // Take the LAST enabled SVG button (send is always rightmost)
+              for (let k = btns.length - 1; k >= 0; k--) {
+                const b = btns[k];
+                const hasSvg = !!b.querySelector('svg');
+                console.log(`[GPI]     btn[${k}] disabled=${b.disabled} hasSvg=${hasSvg} class="${b.className.slice(0,50)}"`);
+                if (!b.disabled && hasSvg) {
+                  console.log('[GPI] ✅ CLICK bottom-right-last-svg');
+                  b.click(); submitted = true;
+                  resolve({ ok: true, method: 'bottom-right-btn' }); return;
+                }
               }
             }
-            const allFormBtns = form.querySelectorAll('button:not([disabled])');
-            console.log(`[GPI]   form all enabled btns: ${allFormBtns.length}`);
-            if (allFormBtns.length > 0) {
-              const btn = allFormBtns[allFormBtns.length - 1];
-              console.log('[GPI] ✅ CLICK form-last-button:', btn.className.slice(0,60));
+            // Fallback: last enabled SVG button in any absolute div
+            const allSvgBtns = Array.from(form.querySelectorAll('div.absolute button'))
+              .filter(b => !b.disabled && b.querySelector('svg'));
+            console.log(`[GPI]   allSvgBtns (enabled): ${allSvgBtns.length}`);
+            if (allSvgBtns.length > 0) {
+              const btn = allSvgBtns[allSvgBtns.length - 1];
+              console.log('[GPI] ✅ CLICK last-svg-btn:', btn.className.slice(0,50));
               btn.click(); submitted = true;
-              resolve({ ok: true, method: 'form-last-button' }); return;
+              resolve({ ok: true, method: 'last-svg-btn' }); return;
             }
           }
 
