@@ -1905,8 +1905,9 @@ async function runShortFilm() {
         const res = await injectImageToPage(tab.id, ch.imageDataUrl, 'image/jpeg', fname);
         if (res.ok) addLog(sfLogEl, `    ✓ ${ch.name || 'Nhân vật'}: ảnh ref đã gán`, 'ok');
         else        addLog(sfLogEl, `    ⚠ ${ch.name || 'Nhân vật'}: ${res.error}`, 'warn');
-        await sleep(300);
+        await sleep(500);
       }
+      await sleep(800); // Wait for UI to stabilize after images
     }
 
     // Step A: Inject reference frame (chaining)
@@ -1918,19 +1919,76 @@ async function runShortFilm() {
       if (imgRes.ok) { addLog(sfLogEl, `  ✓ Reference frame đã gán`, 'ok'); }
       else           { addLog(sfLogEl, `  ⚠ Không gán được ref: ${imgRes.error}`, 'warn'); }
       sfSetSceneStatus(scene.id, 'running');
-      await sleep(600);
+      await sleep(800);
     }
 
     // Step B: Inject full prompt + submit
-    addLog(sfLogEl, `  ✍ Inject full prompt...`);
-    const txtRes = await injectTextPrompt(tab.id, fullPrompt, true);
-    if (!txtRes.ok) {
-      addLog(sfLogEl, `  ✗ ${txtRes.error}`, 'err');
+    addLog(sfLogEl, `  ✍ Inject prompt...`);
+    await sleep(500); // Let UI settle before typing
+
+    // First inject text WITHOUT submit
+    const txtInject = await injectTextPrompt(tab.id, fullPrompt, false);
+    if (!txtInject.ok) {
+      addLog(sfLogEl, `  ✗ ${txtInject.error}`, 'err');
       sfSetSceneStatus(scene.id, 'error');
-      $(`sf-serr-${scene.id}`).textContent = `⚠ Inject thất bại: ${txtRes.error}`;
+      $(`sf-serr-${scene.id}`).textContent = `⚠ Inject thất bại: ${txtInject.error}`;
       continue;
     }
-    addLog(sfLogEl, `  ✓ Prompt đã submit`, 'ok');
+    addLog(sfLogEl, `  ✓ Prompt đã inject, đợi submit...`);
+
+    // Wait for submit button to become ready
+    await sleep(800);
+
+    // Now submit via dedicated click
+    const submitRes = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const btnsels = [
+          'button[aria-label*="Grok"]', 'button[aria-label*="Send"]',
+          'button[aria-label*="Generate"]', 'button[type="submit"]',
+          'button[data-testid*="send"]', 'button[data-testid*="submit"]',
+        ];
+        // Try clicking submit button
+        for (const s of btnsels) {
+          const b = document.querySelector(s);
+          if (b && !b.disabled) { b.click(); return { ok: true, method: 'button', sel: s }; }
+        }
+        // Fallback: find any enabled button with send/submit icon near input
+        const allBtns = document.querySelectorAll('button:not([disabled])');
+        for (const b of allBtns) {
+          const svg = b.querySelector('svg');
+          const ariaLabel = (b.getAttribute('aria-label') || '').toLowerCase();
+          const text = (b.textContent || '').toLowerCase();
+          if (svg && (ariaLabel.includes('send') || ariaLabel.includes('submit') ||
+                      ariaLabel.includes('generate') || text.includes('generate'))) {
+            b.click(); return { ok: true, method: 'svg-button' };
+          }
+        }
+        // Last resort: Enter key on the input
+        const editors = document.querySelectorAll('div[contenteditable="true"], textarea');
+        for (const el of editors) {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            el.focus();
+            el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
+            el.dispatchEvent(new KeyboardEvent('keyup',   { key: 'Enter', keyCode: 13, bubbles: true }));
+            return { ok: true, method: 'enter-key' };
+          }
+        }
+        return { ok: false, error: 'Không tìm thấy nút submit' };
+      },
+    });
+    const subResult = submitRes?.[0]?.result || { ok: false, error: 'Script error' };
+    if (!subResult.ok) {
+      addLog(sfLogEl, `  ⚠ Submit thất bại: ${subResult.error}`, 'warn');
+      // Retry once more after delay
+      await sleep(1000);
+      const retry = await injectTextPrompt(tab.id, '', true); // empty text, just submit
+      if (retry.ok) { addLog(sfLogEl, `  ✓ Submit retry thành công (${retry.method})`, 'ok'); }
+      else          { addLog(sfLogEl, `  ✗ Submit thất bại hoàn toàn`, 'err'); sfSetSceneStatus(scene.id, 'error'); continue; }
+    } else {
+      addLog(sfLogEl, `  ✓ Đã submit (${subResult.method})`, 'ok');
+    }
 
     // Step C: Wait for generate
     if (doWait) {
