@@ -919,13 +919,25 @@ async function downloadMedia(tabId, prompt, mode = 'video', knownVideoUrls = new
       const urls = [];
 
       if (mode === 'video' || mode === 'auto') {
+        const allVideoUrls = [];
         document.querySelectorAll('video').forEach(v => {
           const src = v.src || '';
-          if (src && !knownV.has(src)) urls.push({ type: 'video', url: src, ext: 'mp4' });
+          if (src) {
+            allVideoUrls.push(src);
+            if (!knownV.has(src)) urls.push({ type: 'video', url: src, ext: 'mp4' });
+          }
           v.querySelectorAll('source').forEach(s => {
-            if (s.src && !knownV.has(s.src)) urls.push({ type: 'video', url: s.src, ext: 'mp4' });
+            if (s.src) {
+              allVideoUrls.push(s.src);
+              if (!knownV.has(s.src)) urls.push({ type: 'video', url: s.src, ext: 'mp4' });
+            }
           });
         });
+        // Fallback: some runs reuse same video URL; use newest visible video URL anyway.
+        if (urls.length === 0 && allVideoUrls.length > 0 && (mode === 'video' || mode === 'auto')) {
+          const last = allVideoUrls[allVideoUrls.length - 1];
+          urls.push({ type: 'video', url: last, ext: 'mp4' });
+        }
       }
 
       if ((mode === 'image' || (mode === 'auto' && urls.length === 0))) {
@@ -2011,7 +2023,8 @@ async function runShortFilm() {
 
   const doChain  = sfChaining.checked;
   const doDL     = sfAutoDL.checked;
-  const doWait   = sfWaitGen.checked;
+  const doWaitUI = sfWaitGen.checked;
+  const doWait   = true; // FIFO strict: luôn chờ scene hiện tại xong rồi mới qua scene tiếp theo.
   const delay    = Math.max(1000, parseInt(sfDelayInput.value) || 2500);
   const tmOut    = (parseInt(sfTimeoutInput.value) || 150) * 1000;
 
@@ -2021,6 +2034,7 @@ async function runShortFilm() {
   sfProgWrap.classList.add('show');
   sfExportCard.classList.remove('show');
   setProgress(sfProgBar, sfProgLabel, 0, sfScenes.length, 'Cảnh xong');
+  if (!doWaitUI) addLog(sfLogEl, 'ℹ Short Film luôn chạy FIFO: tự động chờ scene xong trước khi qua scene tiếp theo.', 'warn');
 
   const downloadedFiles = [];
   let prevFrameDataUrl  = null;
@@ -2050,8 +2064,10 @@ async function runShortFilm() {
       // Build full prompt
       const shotLine   = `[SHOT] ${scene.shot}. [CAMERA] ${scene.camera}.`;
       const sceneLabel = `[SCENE ${i+1}${scene.title ? ' — ' + scene.title : ''}]`;
+      const refLine    = '[REFERENCE] Use attached reference image(s) as strict identity anchor. Keep character face, hair, outfit, and key accessories consistent.';
       const fullPrompt = `${anchor}
 ${shotLine}
+${refLine}
 ${sceneLabel} ${scene.prompt.trim()}`;
 
       console.log('[GPI-SF] fullPrompt length:', fullPrompt.length);
@@ -2061,9 +2077,9 @@ ${sceneLabel} ${scene.prompt.trim()}`;
       addLog(sfLogEl, `  Prompt: ${scene.prompt.slice(0,55)}...`);
       setStatus(`🎬 Cảnh ${i+1}/${sfScenes.length}`, 'orange');
 
-      // Step A0: Inject character reference images (only for first scene)
+      // Step A0: Inject character reference images (every scene for consistency)
       const charRefs = sfCharacters.filter(c => c.imageDataUrl);
-      if (charRefs.length > 0 && i === 0) {
+      if (charRefs.length > 0) {
         addLog(sfLogEl, `  📷 Inject ${charRefs.length} ảnh reference nhân vật...`, 'chain');
         for (const ch of charRefs) {
           const fname = `char_${slugify(ch.name || 'ref')}_${ch.id}.jpg`;
@@ -2115,7 +2131,8 @@ ${sceneLabel} ${scene.prompt.trim()}`;
           const reason = gen.reason === 'timeout' ? 'Timeout' : 'Đã dừng';
           addLog(sfLogEl, `  ⚠ ${reason}`, 'warn');
           sfSetSceneStatus(scene.id, gen.reason === 'timeout' ? 'timeout' : 'idle');
-          if (gen.reason === 'stopped') break;
+          // FIFO strict: scene hiện tại chưa xong thì dừng queue.
+          if (gen.reason === 'stopped' || gen.reason === 'timeout') break;
           generatedOk = false;
         } else {
           addLog(sfLogEl, `  ✅ Generate xong!`, 'ok');
