@@ -1036,9 +1036,11 @@ async function runInjector() {
   if (!tab) { alert('Hãy mở grok.com → Imagine!'); return; }
 
   const delay = Math.max(500, parseInt(delayInput.value) || 2000);
-  const doSubmit = autoSubmit.checked;
+  const doSubmitUI = autoSubmit.checked;
+  const doSubmit = true; // Queue FIFO: mỗi prompt phải submit rồi mới chờ xong để chạy prompt kế.
   const doDL = autoDownload.checked;
-  const doWait = waitGenerate.checked;
+  const doWaitUI = waitGenerate.checked;
+  const doWait = true; // Queue FIFO: luôn chờ generate xong trước khi xử lý prompt tiếp theo.
   const tmOut = (parseInt(timeoutInput.value) || 300) * 1000;
 
   isRunning = true; stopRequested = false;
@@ -1047,6 +1049,8 @@ async function runInjector() {
   logEl.innerHTML = '';
   progressWrap.classList.add('show');
   setProgress(progBar, progLabel, 0, prompts.length);
+  if (!doSubmitUI) addLog(logEl, 'ℹ Queue mode: luôn bật Auto Submit để đảm bảo chạy tuần tự.', 'warn');
+  if (!doWaitUI) addLog(logEl, 'ℹ Queue mode: luôn chờ generate xong trước khi chạy prompt tiếp theo.', 'warn');
 
   // Lock per-prompt duration buttons during run
   document.querySelectorAll('.q-dur-mini').forEach(b => b.classList.add('disabled'));
@@ -1139,11 +1143,6 @@ async function runInjector() {
         if (pbar) pbar.style.width = '0%';
         break;
       }
-    } else {
-      if (pbar) pbar.style.width = '100%';
-      txtQueue[i].state = 'success';
-      if (card) card.className = 'q-item success';
-      if (stat) stat.textContent = '✅ Hoàn thành';
     }
 
     done++;
@@ -1476,7 +1475,8 @@ async function runImg2Vid() {
   if (!tab) { alert('Hãy mở grok.com → Imagine!'); return; }
 
   const doDL = i2vAutoDL.checked;
-  const doWait = i2vWaitGen.checked;
+  const doWaitUI = i2vWaitGen.checked;
+  const doWait = true; // Queue FIFO cho Img2Vid.
   const tmOut = (parseInt(timeoutInput.value) || 300) * 1000;
   const delay = Math.max(500, parseInt(delayInput.value) || 2000);
 
@@ -1486,6 +1486,7 @@ async function runImg2Vid() {
   i2vProgressWrap.classList.add('show');
   setProgress(i2vProgBar, i2vProgLabel, 0, i2vPairs.length, 'Đã xử lý');
   i2vSetStep(3);
+  if (!doWaitUI) addLog(i2vLogEl, 'ℹ Queue mode: Img2Vid luôn chờ generate xong trước khi chạy cặp tiếp theo.', 'warn');
 
   let done = 0;
   for (let i = 0; i < i2vPairs.length; i++) {
