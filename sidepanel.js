@@ -1436,12 +1436,13 @@ async function runImg2Vid() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ── SF DOM refs ───────────────────────────────────────────────────────────────
-const sfCharEl     = $('sf-char');
 const sfWorldEl    = $('sf-world');
 const sfStyleEl    = $('sf-style');
 const sfAnchorPrev = $('sf-anchor-preview');
 const sfBibleBody  = $('sf-bible-body');
 const sfBibleArrow = $('sf-bible-arrow');
+const sfCharListEl = $('sf-char-list');
+const sfCharCountLabel = $('sf-char-count-label');
 const sfSceneList  = $('sf-scene-list');
 const sfCountLabel = $('sf-scene-count-label');
 const sfGuardBanner= $('sf-guard-banner');
@@ -1467,6 +1468,10 @@ let sfStopReq   = false;
 let sfScenes = [];
 let sfSceneIdCounter = 0;
 
+// Characters: [{id, name, description, role:'main'|'sub', imageDataUrl, imageFileName}]
+let sfCharacters = [];
+let sfCharIdCounter = 0;
+
 const SHOT_TYPES = [
   'Extreme Wide Shot (EWS)', 'Wide Shot (WS)', 'Medium Wide Shot (MWS)',
   'Medium Shot (MS)', 'Medium Close-Up (MCU)', 'Close-Up (CU)',
@@ -1483,7 +1488,6 @@ async function captureLastFrame(tabId) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => {
-      // Try video first
       const videos = Array.from(document.querySelectorAll('video')).filter(v => {
         const r = v.getBoundingClientRect();
         return r.width > 100 && r.height > 100;
@@ -1499,7 +1503,6 @@ async function captureLastFrame(tabId) {
           return { ok: true, dataUrl: canvas.toDataURL('image/jpeg', 0.85), source: 'video' };
         } catch { /* cross-origin fallback */ }
       }
-      // Fallback: largest image
       const imgs = Array.from(document.querySelectorAll('img[src]')).filter(img => {
         const src = img.src || '';
         const r   = img.getBoundingClientRect();
@@ -1526,35 +1529,160 @@ async function captureLastFrame(tabId) {
   return results?.[0]?.result || { ok: false, error: 'Capture script thất bại' };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHARACTER MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+function sfUpdateCharCount() {
+  sfCharCountLabel.textContent = `— ${sfCharacters.length} nhân vật`;
+}
+
+function sfAddCharacter(data = null) {
+  const id = ++sfCharIdCounter;
+  const isFirst = sfCharacters.length === 0;
+  const ch = data || {
+    id, name: '', description: '', role: isFirst ? 'main' : 'sub',
+    imageDataUrl: null, imageFileName: null,
+  };
+  if (!data) ch.id = id;
+  sfCharacters.push(ch);
+  renderCharCard(ch, sfCharacters.length - 1);
+  sfUpdateCharCount();
+  updateAnchorPreview();
+}
+
+function sfDeleteCharacter(id) {
+  const idx = sfCharacters.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  sfCharacters.splice(idx, 1);
+  // If we deleted the main and there are still chars, promote first to main
+  if (sfCharacters.length > 0 && !sfCharacters.some(c => c.role === 'main')) {
+    sfCharacters[0].role = 'main';
+  }
+  rebuildCharList();
+  sfUpdateCharCount();
+  updateAnchorPreview();
+}
+
+function rebuildCharList() {
+  sfCharListEl.innerHTML = '';
+  sfCharacters.forEach((ch, i) => renderCharCard(ch, i));
+}
+
+function renderCharCard(ch, idx) {
+  const card = document.createElement('div');
+  card.className = 'sf-char-card';
+  card.id = `sf-ch-${ch.id}`;
+
+  const isMain = ch.role === 'main';
+  const roleCls = isMain ? 'main' : 'sub';
+  const roleText = isMain ? 'Chính' : 'Phụ';
+  const hasImg = !!ch.imageDataUrl;
+
+  card.innerHTML = `
+    <div class="sf-char-header">
+      <span class="sf-char-role ${roleCls}" id="sf-chrole-${ch.id}">${roleText}</span>
+      <input class="sf-char-name-input" id="sf-chname-${ch.id}"
+             placeholder="Tên nhân vật (VD: Linh, Tuấn...)" value="${escapeHtml(ch.name)}">
+      <button class="sf-char-del" id="sf-chdel-${ch.id}" title="Xóa nhân vật">✕</button>
+    </div>
+    <div class="sf-char-body">
+      <div class="sf-char-img-zone ${hasImg ? 'has-image' : ''}" id="sf-chzone-${ch.id}">
+        <input type="file" accept="image/*" id="sf-chfile-${ch.id}">
+        <div class="sf-char-img-icon">📷</div>
+        <div class="sf-char-img-label">Ảnh ref</div>
+        <img class="sf-char-preview-img" id="sf-chimg-${ch.id}" src="${ch.imageDataUrl || ''}" alt="">
+        <button class="sf-char-rm-img" id="sf-chrm-${ch.id}">✕</button>
+      </div>
+      <div class="sf-char-text">
+        <textarea class="sf-char-desc" id="sf-chdesc-${ch.id}"
+          placeholder="${isMain ? 'VD: Cô gái 20 tuổi, tóc đen dài, mắt nâu, áo dài trắng...' : 'VD: Chàng trai 25 tuổi, tóc ngắn, áo sơ mi xanh...'}"
+        >${escapeHtml(ch.description)}</textarea>
+      </div>
+    </div>`;
+
+  sfCharListEl.appendChild(card);
+
+  // Events
+  $(`sf-chname-${ch.id}`).addEventListener('input', e => { ch.name = e.target.value; updateAnchorPreview(); });
+  $(`sf-chdesc-${ch.id}`).addEventListener('input', e => { ch.description = e.target.value; updateAnchorPreview(); });
+  $(`sf-chdel-${ch.id}`).addEventListener('click', () => sfDeleteCharacter(ch.id));
+
+  // Image upload
+  $(`sf-chfile-${ch.id}`).addEventListener('change', e => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      ch.imageDataUrl  = ev.target.result;
+      ch.imageFileName = file.name;
+      $(`sf-chimg-${ch.id}`).src = ev.target.result;
+      $(`sf-chzone-${ch.id}`).classList.add('has-image');
+      saveBible();
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // Remove image
+  $(`sf-chrm-${ch.id}`).addEventListener('click', e => {
+    e.stopPropagation();
+    ch.imageDataUrl = null; ch.imageFileName = null;
+    $(`sf-chimg-${ch.id}`).src = '';
+    $(`sf-chzone-${ch.id}`).classList.remove('has-image');
+    $(`sf-chfile-${ch.id}`).value = '';
+    saveBible();
+  });
+}
+
 // ── BIBLE ─────────────────────────────────────────────────────────────────────
 function buildAnchorPrompt() {
-  const char  = sfCharEl.value.trim();
   const world = sfWorldEl.value.trim();
   const style = sfStyleEl.value.trim();
   const parts = [];
   if (style) parts.push(`[VISUAL STYLE] ${style}`);
-  if (char)  parts.push(`[MAIN CHARACTER] ${char}`);
+
+  // Characters
+  sfCharacters.forEach(ch => {
+    if (!ch.name && !ch.description) return;
+    const tag = ch.role === 'main' ? 'MAIN CHARACTER' : 'SUPPORTING CHARACTER';
+    const nameStr = ch.name ? ch.name : 'Unknown';
+    const desc = ch.description ? `: ${ch.description}` : '';
+    const hasRef = ch.imageDataUrl ? ' (reference image attached)' : '';
+    parts.push(`[${tag}] ${nameStr}${desc}${hasRef}`);
+  });
+
   if (world) parts.push(`[WORLD] ${world}`);
-  parts.push('[CONSISTENCY] Same character, same visual style, same color grading across all scenes. Cinematic short film.');
+  parts.push('[CONSISTENCY] Same characters, same visual style, same color grading across all scenes. Cinematic short film.');
   return parts.join('\n');
 }
 
 function updateAnchorPreview() {
   const anchor = buildAnchorPrompt();
-  sfAnchorPrev.textContent = anchor || '← Điền các trường trên để xem preview';
+  sfAnchorPrev.textContent = anchor || '← Thêm nhân vật và điền các trường để xem preview';
   saveBible();
 }
 
 function saveBible() {
+  // Save characters (exclude large imageDataUrl to avoid quota — only save text)
+  const lightChars = sfCharacters.map(c => ({
+    id: c.id, name: c.name, description: c.description, role: c.role,
+    imageDataUrl: null, imageFileName: c.imageFileName,
+  }));
   chrome.storage.local.set({
-    sfChar: sfCharEl.value,
+    sfCharacters: lightChars,
+    sfCharIdCounter,
     sfWorld: sfWorldEl.value,
     sfStyle: sfStyleEl.value,
   });
 }
 
-[sfCharEl, sfWorldEl, sfStyleEl].forEach(el => {
+// World/Style input listeners
+[sfWorldEl, sfStyleEl].forEach(el => {
   if (el) el.addEventListener('input', updateAnchorPreview);
+});
+
+// Add character button
+$('sf-add-char-btn').addEventListener('click', () => {
+  if (sfCharacters.length >= 8) { alert('Tối đa 8 nhân vật!'); return; }
+  sfAddCharacter();
 });
 
 // Bible collapse
@@ -1721,8 +1849,8 @@ async function runShortFilm() {
     if (!scene.prompt.trim()) errors.push(`Cảnh ${i+1}: chưa có scene prompt`);
   });
   if (!sfScenes.length) errors.push('Chưa có cảnh nào — nhấn "Thêm cảnh mới"');
-  if (!anchor.includes('[MAIN CHARACTER]') && !anchor.includes('[WORLD]') && !anchor.includes('[VISUAL STYLE]'))
-    errors.push('Character Bible trống — hãy điền ít nhất một trường');
+  if (!sfCharacters.length && !sfWorldEl.value.trim() && !sfStyleEl.value.trim())
+    errors.push('Character Bible trống — thêm ít nhất 1 nhân vật hoặc bối cảnh');
 
   if (errors.length) {
     sfGuardBanner.innerHTML = '⚠ <strong>Không thể chạy:</strong><br>' + errors.map(e => `• ${e}`).join('<br>');
@@ -1767,6 +1895,19 @@ async function runShortFilm() {
     addLog(sfLogEl, `  Shot: ${scene.shot} | Cam: ${scene.camera}`);
     addLog(sfLogEl, `  Prompt: ${scene.prompt.slice(0,55)}...`);
     setStatus(`🎬 Cảnh ${i+1}/${sfScenes.length}`, 'orange');
+
+    // Step A0: Inject character reference images (only for first scene or when not chaining)
+    const charRefs = sfCharacters.filter(c => c.imageDataUrl);
+    if (charRefs.length > 0 && (i === 0 || !doChain || !prevFrameDataUrl)) {
+      addLog(sfLogEl, `  📷 Inject ${charRefs.length} ảnh reference nhân vật...`, 'chain');
+      for (const ch of charRefs) {
+        const fname = `char_${slugify(ch.name || 'ref')}_${ch.id}.jpg`;
+        const res = await injectImageToPage(tab.id, ch.imageDataUrl, 'image/jpeg', fname);
+        if (res.ok) addLog(sfLogEl, `    ✓ ${ch.name || 'Nhân vật'}: ảnh ref đã gán`, 'ok');
+        else        addLog(sfLogEl, `    ⚠ ${ch.name || 'Nhân vật'}: ${res.error}`, 'warn');
+        await sleep(300);
+      }
+    }
 
     // Step A: Inject reference frame (chaining)
     const refDataUrl = (doChain && prevFrameDataUrl) ? prevFrameDataUrl : scene.chainDataUrl;
@@ -2044,7 +2185,7 @@ chrome.storage.local.get([
   'savedI2vAutoDL', 'savedI2vWaitGen',
   'savedRatio', 'savedImgRatio', 'savedI2vRatio', 'savedI2vDuration',
   // Short Film
-  'sfChar', 'sfWorld', 'sfStyle', 'sfScenes', 'sfSceneIdCounter',
+  'sfCharacters', 'sfCharIdCounter', 'sfWorld', 'sfStyle', 'sfScenes', 'sfSceneIdCounter',
   'sfDelay', 'sfTimeout', 'sfAutoDLSetting', 'sfChainingSetting', 'sfWaitGenSetting',
 ], data => {
   if (data.savedPrompts) promptsInput.value = data.savedPrompts;
@@ -2067,8 +2208,11 @@ chrome.storage.local.get([
   if (data.savedI2vRatio) { i2vSelectedRatio = data.savedI2vRatio; applyRatioPill('i2v-ratio-pills', i2vSelectedRatio); }
   if (data.savedI2vDuration) { i2vSelectedDuration = data.savedI2vDuration; applyDurBtn('i2v-dur-btns', i2vSelectedDuration); }
 
-  // Short Film Bible
-  if (data.sfChar)  sfCharEl.value  = data.sfChar;
+  // Short Film Bible — restore characters
+  if (data.sfCharacters?.length) {
+    sfCharIdCounter = data.sfCharIdCounter || data.sfCharacters.length;
+    data.sfCharacters.forEach(ch => sfAddCharacter(ch));
+  }
   if (data.sfWorld) sfWorldEl.value = data.sfWorld;
   if (data.sfStyle) sfStyleEl.value = data.sfStyle;
   updateAnchorPreview();
