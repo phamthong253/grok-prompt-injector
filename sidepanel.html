@@ -1300,6 +1300,112 @@
       color: var(--accent);
     }
 
+    /* ══ SHORT FILM ══ */
+    .sf-bible-card { background:var(--bg2); border:1px solid var(--border); border-radius:11px; overflow:hidden; }
+    .sf-bible-header { display:flex; align-items:center; justify-content:space-between;
+      padding:9px 13px; background:var(--bg3); border-bottom:1px solid var(--border);
+      cursor:pointer; user-select:none; }
+    .sf-bible-header h3 { font-size:12px; font-weight:700; display:flex; align-items:center; gap:6px; }
+    .sf-bible-toggle { font-size:10px; color:var(--muted); }
+    .sf-bible-body { padding:12px 13px; display:flex; flex-direction:column; gap:9px; }
+    .sf-bible-body.collapsed { display:none; }
+    .sf-field-label { font-size:10px; font-weight:700; color:var(--muted);
+      text-transform:uppercase; letter-spacing:.07em; margin-bottom:4px; }
+    .sf-field-label span { font-weight:400; text-transform:none; color:var(--dimmed); margin-left:4px; }
+    .sf-textarea { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:8px;
+      color:var(--text); font-size:11.5px; line-height:1.6; padding:9px 11px; resize:vertical;
+      font-family:inherit; outline:none; transition:border-color .2s; min-height:58px; }
+    .sf-textarea:focus { border-color:var(--accent); }
+    .sf-textarea::placeholder { color:var(--dimmed); font-size:11px; }
+    .sf-anchor-preview { background:#7c6aff0d; border:1px solid #7c6aff30; border-radius:8px;
+      padding:9px 11px; font-size:10.5px; color:#9090c0; line-height:1.65;
+      max-height:75px; overflow-y:auto; white-space:pre-wrap; word-break:break-word; }
+    .sf-anchor-preview::-webkit-scrollbar { width:3px; }
+    .sf-anchor-preview::-webkit-scrollbar-thumb { background:var(--border); }
+
+    .sf-scene-list { display:flex; flex-direction:column; gap:8px; }
+    .sf-scene-card { background:var(--bg2); border:1px solid var(--border); border-radius:11px;
+      overflow:hidden; transition:border-color .2s,box-shadow .2s; }
+    .sf-scene-card.running  { border-color:var(--amber); box-shadow:0 0 0 1px #f59e0b22; }
+    .sf-scene-card.done     { border-color:var(--green); }
+    .sf-scene-card.error    { border-color:var(--red); }
+    .sf-scene-card.chaining { border-color:var(--blue); box-shadow:0 0 0 1px #3b82f622; }
+    .sf-scene-header { display:flex; align-items:center; gap:8px; padding:7px 11px;
+      background:var(--bg3); border-bottom:1px solid var(--border); }
+    .sf-scene-num { width:22px; height:22px; border-radius:50%; flex-shrink:0; background:var(--dimmed);
+      color:var(--text); display:flex; align-items:center; justify-content:center;
+      font-size:10px; font-weight:700; transition:background .2s; }
+    .sf-scene-card.running  .sf-scene-num { background:var(--amber); color:#000; }
+    .sf-scene-card.done     .sf-scene-num { background:var(--green); color:#fff; }
+    .sf-scene-card.error    .sf-scene-num { background:var(--red);   color:#fff; }
+    .sf-scene-card.chaining .sf-scene-num { background:var(--blue);  color:#fff; }
+    .sf-scene-title-input { flex:1; background:transparent; border:none; outline:none;
+      color:var(--text); font-size:12px; font-weight:600; font-family:inherit; }
+    .sf-scene-title-input::placeholder { color:var(--dimmed); font-weight:400; }
+    .sf-scene-badge { font-size:9px; font-weight:700; padding:2px 7px; border-radius:4px;
+      flex-shrink:0; background:var(--bg); color:var(--muted); border:1px solid var(--border);
+      white-space:nowrap; }
+    .sf-scene-card.running  .sf-scene-badge { background:#f59e0b20; color:var(--amber); border-color:#f59e0b40; }
+    .sf-scene-card.done     .sf-scene-badge { background:#10b98120; color:var(--green); border-color:#10b98140; }
+    .sf-scene-card.error    .sf-scene-badge { background:#ef444420; color:var(--red);   border-color:#ef444440; }
+    .sf-scene-card.chaining .sf-scene-badge { background:#3b82f620; color:var(--blue);  border-color:#3b82f640; }
+    .sf-scene-del { width:20px; height:20px; border-radius:5px; background:transparent;
+      border:none; color:var(--dimmed); cursor:pointer; font-size:13px;
+      display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .sf-scene-del:hover { color:var(--red); background:#ef444415; }
+    .sf-scene-body { padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+    .sf-scene-body.collapsed { display:none; }
+    .sf-scene-meta-row { display:flex; gap:7px; }
+    .sf-select { flex:1; background:var(--bg3); border:1px solid var(--border); border-radius:7px;
+      color:var(--text); font-size:11px; padding:5px 8px; outline:none; cursor:pointer; font-family:inherit; }
+    .sf-select:focus { border-color:var(--accent); }
+    .sf-scene-prompt { width:100%; background:var(--bg3); border:1px solid var(--border);
+      border-radius:8px; color:var(--text); font-size:11.5px; line-height:1.6;
+      padding:9px 11px; resize:vertical; min-height:58px; font-family:inherit; outline:none; }
+    .sf-scene-prompt:focus { border-color:var(--accent); }
+    .sf-scene-prompt::placeholder { color:var(--dimmed); font-size:11px; }
+    .sf-chain-row { display:flex; align-items:center; gap:8px; padding:7px 10px;
+      background:var(--bg); border:1px solid var(--border); border-radius:8px; }
+    .sf-chain-thumb { width:40px; height:32px; border-radius:6px; object-fit:cover;
+      background:var(--bg3); flex-shrink:0; border:1px solid var(--border); }
+    .sf-chain-placeholder { width:40px; height:32px; border-radius:6px; background:var(--bg3);
+      flex-shrink:0; display:flex; align-items:center; justify-content:center;
+      font-size:14px; border:1px dashed var(--border); }
+    .sf-chain-info { flex:1; min-width:0; }
+    .sf-chain-label { font-size:9.5px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+    .sf-chain-desc  { font-size:10.5px; color:var(--text); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .sf-chain-upload { flex-shrink:0; position:relative; overflow:hidden; padding:5px 9px;
+      border-radius:6px; font-size:10px; font-weight:600; background:var(--bg2);
+      border:1px solid var(--border); color:var(--muted); cursor:pointer; white-space:nowrap; }
+    .sf-chain-upload:hover { color:var(--text); background:var(--bg3); }
+    .sf-chain-upload input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; }
+    .sf-gen-frame { display:none; align-items:center; gap:8px; padding:6px 10px;
+      background:#10b98108; border:1px solid #10b98130; border-radius:8px; }
+    .sf-gen-frame.show { display:flex; }
+    .sf-gen-frame img { width:48px; height:32px; border-radius:5px; object-fit:cover; background:var(--bg3); }
+    .sf-gen-frame-info { font-size:10.5px; color:var(--green); }
+    .sf-gen-frame-info span { color:var(--muted); font-size:10px; display:block; margin-top:1px; }
+    .sf-scene-error { font-size:10.5px; color:var(--red); padding:4px 0 2px; display:none; }
+    .sf-scene-card.error .sf-scene-error { display:block; }
+    .sf-add-btn { width:100%; padding:10px; background:transparent; border:1px dashed var(--border);
+      border-radius:10px; color:var(--muted); font-size:12px; font-weight:600; cursor:pointer;
+      transition:all .15s; display:flex; align-items:center; justify-content:center; gap:6px; }
+    .sf-add-btn:hover { border-color:var(--accent); color:var(--accent); background:#7c6aff08; }
+    .sf-guard-banner { background:#ef444415; border:1px solid #ef444440; border-radius:8px;
+      padding:9px 12px; font-size:11px; color:var(--red); display:none; line-height:1.6; }
+    .sf-guard-banner.show { display:block; }
+    .sf-export-card { background:#10b98108; border:1px solid #10b98130; border-radius:11px;
+      padding:12px 13px; display:none; flex-direction:column; gap:9px; }
+    .sf-export-card.show { display:flex; }
+    .sf-export-card h3 { font-size:12px; font-weight:700; color:var(--green); }
+    .sf-ffmpeg-cmd { background:var(--bg); border:1px solid var(--border); border-radius:7px;
+      padding:9px 11px; font-family:'Courier New',monospace; font-size:10px; color:#a0e0a0;
+      white-space:pre-wrap; word-break:break-all; user-select:all; overflow-x:auto; }
+    .sf-export-item { display:flex; align-items:center; gap:7px; font-size:11px; color:var(--muted); }
+    .sf-export-item .dot { flex-shrink:0; }
+    .sf-export-item.ready .dot { background:var(--green); box-shadow:0 0 5px #10b98166; }
+    .log-chain { color:#c084fc; }
+
     /* ══ FOOTER ══ */
     .footer {
       display: flex;
@@ -1319,8 +1425,8 @@
   <div class="header">
     <div class="logo">G</div>
     <div class="header-info">
-      <h1>Grok Injector <span class="version-badge">v2.3</span></h1>
-      <p>Tự động gán prompt · Tạo ảnh · Img→Video · Auto tải về</p>
+      <h1>Grok Injector <span class="version-badge">v3.0</span></h1>
+      <p>Video · Ảnh · Img2Vid · Short Film Pipeline</p>
     </div>
   </div>
 
@@ -1332,11 +1438,12 @@
 
   <!-- TABS -->
   <div class="tabs">
-    <div class="tab active" data-tab="inject">⚡ Tạo Video</div>
-    <div class="tab" data-tab="image">🖼 Tạo Ảnh</div>
-    <div class="tab" data-tab="img2vid">🖼→🎬 Img2Vid</div>
-    <div class="tab" data-tab="downloads">⬇ Đã tải</div>
-    <div class="tab" data-tab="settings">⚙ Cài đặt</div>
+    <div class="tab active" data-tab="inject">⚡ Video</div>
+    <div class="tab" data-tab="image">🖼 Ảnh</div>
+    <div class="tab" data-tab="img2vid">🖼→🎬</div>
+    <div class="tab" data-tab="shortfilm">🎬 Film</div>
+    <div class="tab" data-tab="downloads">⬇</div>
+    <div class="tab" data-tab="settings">⚙</div>
   </div>
 
   <div class="body">
@@ -1558,6 +1665,112 @@ A cat sleeping on a sofa, afternoon light..."></textarea>
 
     </div><!-- /tab-img2vid -->
 
+    <!-- ══ TAB: SHORT FILM ══ -->
+    <div class="tab-pane" id="tab-shortfilm">
+
+      <!-- 1. Character & World Bible -->
+      <div class="sf-bible-card" id="sf-bible-card">
+        <div class="sf-bible-header" id="sf-bible-toggle-btn">
+          <h3>📖 Character & World Bible</h3>
+          <span class="sf-bible-toggle" id="sf-bible-arrow">▼ Thu gọn</span>
+        </div>
+        <div class="sf-bible-body" id="sf-bible-body">
+          <div>
+            <div class="sf-field-label">Nhân vật chính <span>— ngoại hình, trang phục</span></div>
+            <textarea class="sf-textarea" id="sf-char" rows="3"
+              placeholder="VD: Cô gái 20 tuổi tên Linh, tóc đen dài, mắt nâu, áo dài trắng..."></textarea>
+          </div>
+          <div>
+            <div class="sf-field-label">Bối cảnh & Thế giới <span>— thời đại, địa điểm</span></div>
+            <textarea class="sf-textarea" id="sf-world" rows="2"
+              placeholder="VD: Sài Gòn 1960, đường phố cổ kính, xe đạp và cyclo..."></textarea>
+          </div>
+          <div>
+            <div class="sf-field-label">Visual Style <span>— màu sắc, ánh sáng, camera</span></div>
+            <textarea class="sf-textarea" id="sf-style" rows="2"
+              placeholder="VD: 35mm film grain, warm sepia tones, golden hour, cinematic widescreen."></textarea>
+          </div>
+          <div>
+            <div class="sf-field-label" style="margin-bottom:6px">🔗 Anchor Prompt (tự gắn đầu mỗi cảnh)</div>
+            <div class="sf-anchor-preview" id="sf-anchor-preview">← Điền các trường trên để xem preview</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Scene list -->
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div class="sec-label" style="margin-bottom:0">🎞 Danh sách cảnh
+          <span style="font-weight:400;color:var(--dimmed);text-transform:none;margin-left:4px"
+                id="sf-scene-count-label">— 0 cảnh</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary" id="sf-collapse-all-btn"
+            style="flex:0;padding:4px 9px;font-size:10px">↕ Thu/Mở</button>
+          <button class="btn btn-secondary" id="sf-clear-all-btn"
+            style="flex:0;padding:4px 9px;font-size:10px">✕ Xóa tất cả</button>
+        </div>
+      </div>
+
+      <div class="sf-scene-list" id="sf-scene-list"></div>
+      <button class="sf-add-btn" id="sf-add-scene-btn">＋ Thêm cảnh mới</button>
+
+      <!-- 3. Guard -->
+      <div class="sf-guard-banner" id="sf-guard-banner"></div>
+
+      <!-- 4. Options -->
+      <div class="card" style="display:flex;flex-direction:column;gap:9px;background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:11px 13px">
+        <div class="toggle-row">
+          <span>⬇ Tự tải về từng cảnh</span>
+          <label class="toggle"><input type="checkbox" id="sf-auto-download" checked><span class="tog-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>🔗 Chaining: frame cuối → cảnh sau</span>
+          <label class="toggle"><input type="checkbox" id="sf-chaining" checked><span class="tog-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>⏳ Chờ generate xong mỗi cảnh</span>
+          <label class="toggle"><input type="checkbox" id="sf-wait-gen" checked><span class="tog-slider"></span></label>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <div class="setting-card">
+          <div class="sc-label">Delay giữa cảnh (ms)</div>
+          <input type="number" id="sf-delay-input" value="2500" min="1000" max="30000" step="100" />
+        </div>
+        <div class="setting-card">
+          <div class="sc-label">Timeout/cảnh (s)</div>
+          <input type="number" id="sf-timeout-input" value="150" min="60" max="600" step="10" />
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="sf-run-btn">▶ Chạy Short Film</button>
+        <button class="btn btn-danger" id="sf-stop-btn" disabled>■ Dừng</button>
+        <button class="btn btn-secondary" id="sf-reset-btn">↺ Reset</button>
+      </div>
+
+      <!-- 5. Progress -->
+      <div class="progress-wrap" id="sf-progress-wrap">
+        <div class="prog-bar-bg"><div class="prog-bar" id="sf-prog-bar"></div></div>
+        <div class="prog-label" id="sf-prog-label">Đang chờ...</div>
+        <div class="log-box" id="sf-log"></div>
+      </div>
+
+      <!-- 6. Export guide -->
+      <div class="sf-export-card" id="sf-export-card">
+        <h3>✅ Xuất phim hoàn chỉnh</h3>
+        <div style="font-size:11px;color:var(--muted)">Dùng FFmpeg để ghép:</div>
+        <div class="sf-ffmpeg-cmd" id="sf-ffmpeg-cmd"></div>
+        <div style="font-size:10.5px;color:var(--muted);line-height:1.7">
+          💡 <code style="color:var(--accent)">winget install ffmpeg</code> (Win) |
+          <code style="color:var(--accent)">brew install ffmpeg</code> (Mac)
+        </div>
+        <div id="sf-export-list" style="display:flex;flex-direction:column;gap:5px"></div>
+      </div>
+
+    </div><!-- /tab-shortfilm -->
+
     <!-- ── TAB: DOWNLOADS ── -->
     <div class="tab-pane" id="tab-downloads">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -1605,7 +1818,7 @@ A cat sleeping on a sofa, afternoon light..."></textarea>
 
   <!-- FOOTER -->
   <div class="footer">
-    <span>Grok Injector v2.3</span>
+    <span>Grok Injector v3.0</span>
     <span id="footer-dl-count">0 file đã tải</span>
   </div>
 

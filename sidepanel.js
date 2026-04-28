@@ -1431,6 +1431,460 @@ async function runImg2Vid() {
   addLog(i2vLogEl, `── Hoàn tất: ${done}/${i2vPairs.length} ──`, allOk ? 'ok' : 'warn');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SHORT FILM PIPELINE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── SF DOM refs ───────────────────────────────────────────────────────────────
+const sfCharEl     = $('sf-char');
+const sfWorldEl    = $('sf-world');
+const sfStyleEl    = $('sf-style');
+const sfAnchorPrev = $('sf-anchor-preview');
+const sfBibleBody  = $('sf-bible-body');
+const sfBibleArrow = $('sf-bible-arrow');
+const sfSceneList  = $('sf-scene-list');
+const sfCountLabel = $('sf-scene-count-label');
+const sfGuardBanner= $('sf-guard-banner');
+const sfRunBtn     = $('sf-run-btn');
+const sfStopBtn    = $('sf-stop-btn');
+const sfResetBtn   = $('sf-reset-btn');
+const sfProgWrap   = $('sf-progress-wrap');
+const sfProgBar    = $('sf-prog-bar');
+const sfProgLabel  = $('sf-prog-label');
+const sfLogEl      = $('sf-log');
+const sfExportCard = $('sf-export-card');
+const sfFfmpegCmd  = $('sf-ffmpeg-cmd');
+const sfExportList = $('sf-export-list');
+const sfAutoDL     = $('sf-auto-download');
+const sfChaining   = $('sf-chaining');
+const sfWaitGen    = $('sf-wait-gen');
+const sfDelayInput = $('sf-delay-input');
+const sfTimeoutInput = $('sf-timeout-input');
+
+// ── SF State ──────────────────────────────────────────────────────────────────
+let sfIsRunning = false;
+let sfStopReq   = false;
+let sfScenes = [];
+let sfSceneIdCounter = 0;
+
+const SHOT_TYPES = [
+  'Extreme Wide Shot (EWS)', 'Wide Shot (WS)', 'Medium Wide Shot (MWS)',
+  'Medium Shot (MS)', 'Medium Close-Up (MCU)', 'Close-Up (CU)',
+  'Extreme Close-Up (ECU)', 'Over-the-Shoulder (OTS)', 'POV Shot',
+  'Two-Shot', 'Insert Shot',
+];
+const CAMERA_MOVES = [
+  'Static', 'Pan left', 'Pan right', 'Tilt up', 'Tilt down',
+  'Dolly in', 'Dolly out', 'Tracking shot', 'Handheld', 'Crane up',
+];
+
+// ── CAPTURE LAST FRAME ────────────────────────────────────────────────────────
+async function captureLastFrame(tabId) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      // Try video first
+      const videos = Array.from(document.querySelectorAll('video')).filter(v => {
+        const r = v.getBoundingClientRect();
+        return r.width > 100 && r.height > 100;
+      });
+      if (videos.length > 0) {
+        const v = videos[videos.length - 1];
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width  = v.videoWidth  || v.clientWidth;
+          canvas.height = v.videoHeight || v.clientHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+          return { ok: true, dataUrl: canvas.toDataURL('image/jpeg', 0.85), source: 'video' };
+        } catch { /* cross-origin fallback */ }
+      }
+      // Fallback: largest image
+      const imgs = Array.from(document.querySelectorAll('img[src]')).filter(img => {
+        const src = img.src || '';
+        const r   = img.getBoundingClientRect();
+        return (src.includes('blob:') || src.includes('media') || src.includes('grok'))
+               && r.width > 100 && r.height > 100;
+      }).sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width);
+      if (imgs.length > 0) {
+        const img = imgs[0];
+        if (img.src.startsWith('blob:')) {
+          return fetch(img.src).then(r => r.blob()).then(blob => {
+            const reader = new FileReader();
+            return new Promise(res => {
+              reader.onload = () => res({ ok: true, dataUrl: reader.result, source: 'image' });
+              reader.onerror = () => res({ ok: false, error: 'Read failed' });
+              reader.readAsDataURL(blob);
+            });
+          });
+        }
+        return { ok: true, dataUrl: img.src, source: 'image' };
+      }
+      return { ok: false, error: 'Không tìm thấy media để capture' };
+    },
+  });
+  return results?.[0]?.result || { ok: false, error: 'Capture script thất bại' };
+}
+
+// ── BIBLE ─────────────────────────────────────────────────────────────────────
+function buildAnchorPrompt() {
+  const char  = sfCharEl.value.trim();
+  const world = sfWorldEl.value.trim();
+  const style = sfStyleEl.value.trim();
+  const parts = [];
+  if (style) parts.push(`[VISUAL STYLE] ${style}`);
+  if (char)  parts.push(`[MAIN CHARACTER] ${char}`);
+  if (world) parts.push(`[WORLD] ${world}`);
+  parts.push('[CONSISTENCY] Same character, same visual style, same color grading across all scenes. Cinematic short film.');
+  return parts.join('\n');
+}
+
+function updateAnchorPreview() {
+  const anchor = buildAnchorPrompt();
+  sfAnchorPrev.textContent = anchor || '← Điền các trường trên để xem preview';
+  saveBible();
+}
+
+function saveBible() {
+  chrome.storage.local.set({
+    sfChar: sfCharEl.value,
+    sfWorld: sfWorldEl.value,
+    sfStyle: sfStyleEl.value,
+  });
+}
+
+[sfCharEl, sfWorldEl, sfStyleEl].forEach(el => {
+  if (el) el.addEventListener('input', updateAnchorPreview);
+});
+
+// Bible collapse
+$('sf-bible-toggle-btn').addEventListener('click', () => {
+  const collapsed = sfBibleBody.classList.toggle('collapsed');
+  sfBibleArrow.textContent = collapsed ? '▶ Mở rộng' : '▼ Thu gọn';
+});
+
+// ── SCENE MANAGEMENT ──────────────────────────────────────────────────────────
+function sfUpdateSceneCount() {
+  sfCountLabel.textContent = `— ${sfScenes.length} cảnh`;
+}
+
+function sfAddScene(data = null) {
+  const id = ++sfSceneIdCounter;
+  const scene = data || {
+    id, title: '', shot: SHOT_TYPES[2], camera: CAMERA_MOVES[0],
+    prompt: '', chainDataUrl: null, chainFileName: null, genFrameDataUrl: null, status: 'idle',
+  };
+  if (!data) scene.id = id;
+  sfScenes.push(scene);
+  renderSceneCard(scene, sfScenes.length - 1);
+  sfUpdateSceneCount();
+  saveScenes();
+}
+
+function sfDeleteScene(id) {
+  const idx = sfScenes.findIndex(s => s.id === id);
+  if (idx < 0) return;
+  sfScenes.splice(idx, 1);
+  rebuildSceneList();
+  sfUpdateSceneCount();
+  saveScenes();
+}
+
+function rebuildSceneList() {
+  sfSceneList.innerHTML = '';
+  sfScenes.forEach((scene, i) => renderSceneCard(scene, i));
+}
+
+function renderSceneCard(scene, idx) {
+  const card = document.createElement('div');
+  card.className = 'sf-scene-card';
+  card.id = `sf-scene-${scene.id}`;
+  if (scene.status === 'done')    card.classList.add('done');
+  if (scene.status === 'error')   card.classList.add('error');
+  if (scene.status === 'running') card.classList.add('running');
+
+  const shotOpts = SHOT_TYPES.map(s => `<option ${s===scene.shot?'selected':''}>${s}</option>`).join('');
+  const camOpts  = CAMERA_MOVES.map(s => `<option ${s===scene.camera?'selected':''}>${s}</option>`).join('');
+
+  const chainThumb = scene.chainDataUrl
+    ? `<img class="sf-chain-thumb" src="${scene.chainDataUrl}" alt="ref">`
+    : `<div class="sf-chain-placeholder">🔗</div>`;
+  const chainDesc = scene.chainDataUrl
+    ? (scene.chainFileName || 'Reference frame')
+    : (idx === 0 ? 'Không cần (cảnh đầu)' : 'Chưa có — sẽ tự lấy từ cảnh trước');
+
+  const genFrameShow = scene.genFrameDataUrl ? 'show' : '';
+  const genFrameSrc  = scene.genFrameDataUrl || '';
+  const badgeText = scene.status === 'done' ? '✅ Xong' : scene.status === 'error' ? '✗ Lỗi' : scene.status === 'running' ? '⏳ Đang chạy' : 'Chờ';
+
+  card.innerHTML = `
+    <div class="sf-scene-header">
+      <div class="sf-scene-num">${idx+1}</div>
+      <input class="sf-scene-title-input" id="sf-stitle-${scene.id}"
+             placeholder="Cảnh ${idx+1} — Tên cảnh (tùy chọn)" value="${escapeHtml(scene.title)}">
+      <span class="sf-scene-badge" id="sf-sbadge-${scene.id}">${badgeText}</span>
+      <button class="sf-scene-del" id="sf-sdel-${scene.id}" title="Xóa cảnh">✕</button>
+    </div>
+    <div class="sf-scene-body">
+      <div class="sf-scene-meta-row">
+        <select class="sf-select" id="sf-sshot-${scene.id}">${shotOpts}</select>
+        <select class="sf-select" id="sf-scam-${scene.id}">${camOpts}</select>
+      </div>
+      <div>
+        <div class="sf-field-label" style="font-size:9.5px;margin-bottom:3px">
+          SCENE PROMPT <span>— mô tả hành động cảnh này; anchor tự gắn</span>
+        </div>
+        <textarea class="sf-scene-prompt" id="sf-sprompt-${scene.id}"
+          placeholder="VD: Linh đi chậm dọc đường, tay cầm bức thư, nhìn xuống với vẻ buồn bã."
+          >${escapeHtml(scene.prompt)}</textarea>
+      </div>
+      <div class="sf-chain-row">
+        ${chainThumb}
+        <div class="sf-chain-info">
+          <div class="sf-chain-label">🔗 Reference Frame (Chaining)</div>
+          <div class="sf-chain-desc" id="sf-chaindesc-${scene.id}">${chainDesc}</div>
+        </div>
+        <label class="sf-chain-upload">
+          📁 Upload
+          <input type="file" accept="image/*" id="sf-chainfile-${scene.id}">
+        </label>
+      </div>
+      <div class="sf-gen-frame ${genFrameShow}" id="sf-genframe-${scene.id}">
+        <img src="${genFrameSrc}" alt="generated frame" id="sf-genimg-${scene.id}">
+        <div class="sf-gen-frame-info">
+          ✅ Frame cuối đã capture
+          <span>Sẽ dùng làm reference cho cảnh sau</span>
+        </div>
+      </div>
+      <div class="sf-scene-error" id="sf-serr-${scene.id}"></div>
+    </div>`;
+
+  sfSceneList.appendChild(card);
+
+  // Events
+  $(`sf-stitle-${scene.id}`).addEventListener('input', e => { scene.title = e.target.value; saveScenes(); });
+  $(`sf-sshot-${scene.id}`).addEventListener('change', e => { scene.shot = e.target.value; saveScenes(); });
+  $(`sf-scam-${scene.id}`).addEventListener('change', e => { scene.camera = e.target.value; saveScenes(); });
+  $(`sf-sprompt-${scene.id}`).addEventListener('input', e => { scene.prompt = e.target.value; saveScenes(); });
+  $(`sf-sdel-${scene.id}`).addEventListener('click', () => sfDeleteScene(scene.id));
+  $(`sf-chainfile-${scene.id}`).addEventListener('change', e => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      scene.chainDataUrl  = ev.target.result;
+      scene.chainFileName = file.name;
+      const zone = $(`sf-scene-${scene.id}`)?.querySelector('.sf-chain-row');
+      if (zone) {
+        const placeholder = zone.querySelector('.sf-chain-placeholder');
+        const existing    = zone.querySelector('.sf-chain-thumb');
+        if (placeholder) {
+          const img = document.createElement('img');
+          img.className = 'sf-chain-thumb'; img.src = ev.target.result; img.alt = 'ref';
+          zone.insertBefore(img, placeholder); placeholder.remove();
+        } else if (existing) { existing.src = ev.target.result; }
+      }
+      $(`sf-chaindesc-${scene.id}`).textContent = file.name;
+      saveScenes();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function sfSetSceneStatus(sceneId, status) {
+  const scene = sfScenes.find(s => s.id === sceneId);
+  if (scene) scene.status = status;
+  const card  = $(`sf-scene-${sceneId}`);
+  const badge = $(`sf-sbadge-${sceneId}`);
+  if (!card || !badge) return;
+  card.classList.remove('running','done','error','chaining');
+  const map = {
+    idle:     ['', 'Chờ'],
+    running:  ['running', '⏳ Đang chạy'],
+    chaining: ['chaining', '🔗 Chaining...'],
+    done:     ['done', '✅ Xong'],
+    error:    ['error', '✗ Lỗi'],
+    timeout:  ['error', '⏰ Timeout'],
+  };
+  const [cls, label] = map[status] || ['', status];
+  if (cls) card.classList.add(cls);
+  badge.textContent = label;
+}
+
+// ── SF PIPELINE ───────────────────────────────────────────────────────────────
+async function runShortFilm() {
+  if (sfIsRunning) return;
+
+  // Guard
+  const anchor = buildAnchorPrompt();
+  const errors = [];
+  sfScenes.forEach((scene, i) => {
+    if (!scene.prompt.trim()) errors.push(`Cảnh ${i+1}: chưa có scene prompt`);
+  });
+  if (!sfScenes.length) errors.push('Chưa có cảnh nào — nhấn "Thêm cảnh mới"');
+  if (!anchor.includes('[MAIN CHARACTER]') && !anchor.includes('[WORLD]') && !anchor.includes('[VISUAL STYLE]'))
+    errors.push('Character Bible trống — hãy điền ít nhất một trường');
+
+  if (errors.length) {
+    sfGuardBanner.innerHTML = '⚠ <strong>Không thể chạy:</strong><br>' + errors.map(e => `• ${e}`).join('<br>');
+    sfGuardBanner.classList.add('show');
+    return;
+  }
+  sfGuardBanner.classList.remove('show');
+
+  const tab = await checkTab();
+  if (!tab) { alert('Hãy mở grok.com → Imagine!'); return; }
+
+  const doChain  = sfChaining.checked;
+  const doDL     = sfAutoDL.checked;
+  const doWait   = sfWaitGen.checked;
+  const delay    = Math.max(1000, parseInt(sfDelayInput.value) || 2500);
+  const tmOut    = (parseInt(sfTimeoutInput.value) || 150) * 1000;
+
+  sfIsRunning = true; sfStopReq = false;
+  sfRunBtn.disabled = true; sfStopBtn.disabled = false;
+  sfLogEl.innerHTML = '';
+  sfProgWrap.classList.add('show');
+  sfExportCard.classList.remove('show');
+  setProgress(sfProgBar, sfProgLabel, 0, sfScenes.length, 'Cảnh xong');
+
+  const downloadedFiles = [];
+  let prevFrameDataUrl  = null;
+  let done = 0;
+
+  for (let i = 0; i < sfScenes.length; i++) {
+    if (sfStopReq) { addLog(sfLogEl, `⏹ Dừng tại cảnh ${i+1}`, 'warn'); break; }
+
+    const scene = sfScenes[i];
+    sfSetSceneStatus(scene.id, 'running');
+    $(`sf-scene-${scene.id}`)?.scrollIntoView({ behavior:'smooth', block:'nearest' });
+
+    // Build full prompt
+    const shotLine   = `[SHOT] ${scene.shot}. [CAMERA] ${scene.camera}.`;
+    const sceneLabel = `[SCENE ${i+1}${scene.title ? ' — ' + scene.title : ''}]`;
+    const fullPrompt = `${anchor}\n${shotLine}\n${sceneLabel} ${scene.prompt.trim()}`;
+
+    addLog(sfLogEl, `\n▶ CẢNH ${i+1}${scene.title ? ' — ' + scene.title : ''}`, 'ok');
+    addLog(sfLogEl, `  Shot: ${scene.shot} | Cam: ${scene.camera}`);
+    addLog(sfLogEl, `  Prompt: ${scene.prompt.slice(0,55)}...`);
+    setStatus(`🎬 Cảnh ${i+1}/${sfScenes.length}`, 'orange');
+
+    // Step A: Inject reference frame (chaining)
+    const refDataUrl = (doChain && prevFrameDataUrl) ? prevFrameDataUrl : scene.chainDataUrl;
+    if (refDataUrl) {
+      sfSetSceneStatus(scene.id, 'chaining');
+      addLog(sfLogEl, `  🔗 Inject reference frame...`, 'chain');
+      const imgRes = await injectImageToPage(tab.id, refDataUrl, 'image/jpeg', `ref_scene_${i+1}.jpg`);
+      if (imgRes.ok) { addLog(sfLogEl, `  ✓ Reference frame đã gán`, 'ok'); }
+      else           { addLog(sfLogEl, `  ⚠ Không gán được ref: ${imgRes.error}`, 'warn'); }
+      sfSetSceneStatus(scene.id, 'running');
+      await sleep(600);
+    }
+
+    // Step B: Inject full prompt + submit
+    addLog(sfLogEl, `  ✍ Inject full prompt...`);
+    const txtRes = await injectTextPrompt(tab.id, fullPrompt, true);
+    if (!txtRes.ok) {
+      addLog(sfLogEl, `  ✗ ${txtRes.error}`, 'err');
+      sfSetSceneStatus(scene.id, 'error');
+      $(`sf-serr-${scene.id}`).textContent = `⚠ Inject thất bại: ${txtRes.error}`;
+      continue;
+    }
+    addLog(sfLogEl, `  ✓ Prompt đã submit`, 'ok');
+
+    // Step C: Wait for generate
+    if (doWait) {
+      setStatus(`⏳ Chờ generate cảnh ${i+1}...`, 'orange');
+      addLog(sfLogEl, `  ⏳ Chờ Grok generate...`);
+      await sleep(4000);
+
+      // Snapshot + wait using existing waitForGenerate
+      const knownVids = await snapshotVideoUrls(tab.id);
+      const gen = await waitForGenerate(tab.id, tmOut, knownVids,
+        () => sfStopReq,
+        (pct) => { /* progress optional */ }
+      );
+      if (!gen.ok) {
+        const reason = gen.reason === 'timeout' ? 'Timeout' : 'Đã dừng';
+        addLog(sfLogEl, `  ⚠ ${reason}`, 'warn');
+        sfSetSceneStatus(scene.id, gen.reason === 'timeout' ? 'timeout' : 'idle');
+        if (gen.reason === 'stopped') break;
+        continue;
+      }
+      addLog(sfLogEl, `  ✅ Generate xong!`, 'ok');
+
+      // Step D: Capture last frame for chaining
+      if (doChain) {
+        addLog(sfLogEl, `  📸 Capture frame cuối...`, 'chain');
+        const capture = await captureLastFrame(tab.id);
+        if (capture.ok) {
+          prevFrameDataUrl      = capture.dataUrl;
+          scene.genFrameDataUrl = capture.dataUrl;
+          const genFrameEl = $(`sf-genframe-${scene.id}`);
+          const genImgEl   = $(`sf-genimg-${scene.id}`);
+          if (genFrameEl && genImgEl) { genImgEl.src = capture.dataUrl; genFrameEl.classList.add('show'); }
+          addLog(sfLogEl, `  🔗 Frame captured → sẽ dùng cho cảnh ${i+2}`, 'chain');
+        } else {
+          addLog(sfLogEl, `  ⚠ Capture thất bại: ${capture.error}`, 'warn');
+          prevFrameDataUrl = null;
+        }
+      }
+
+      // Step E: Download
+      if (doDL) {
+        setStatus(`⬇ Tải cảnh ${i+1}...`, 'orange');
+        const knownImgs = await snapshotImageUrls(tab.id);
+        const sceneSlug = `scene${String(i+1).padStart(2,'0')}_${slugify(scene.title||scene.prompt)}`;
+        const files = await downloadMedia(tab.id, sceneSlug, 'video', knownVids, knownImgs);
+        downloadHistory.push(...files.map(f => ({ ...f, prompt: `Cảnh ${i+1}: ${scene.prompt.slice(0,40)}` })));
+        downloadedFiles.push(...files);
+        renderDownloads();
+      }
+    }
+
+    sfSetSceneStatus(scene.id, 'done');
+    done++;
+    setProgress(sfProgBar, sfProgLabel, done, sfScenes.length, 'Cảnh xong');
+    saveScenes();
+
+    if (i < sfScenes.length - 1 && !sfStopReq) {
+      setStatus(`⏱ Chờ ${delay}ms...`, 'orange');
+      await sleep(delay);
+    }
+  }
+
+  sfIsRunning = false;
+  sfRunBtn.disabled = false; sfStopBtn.disabled = true;
+  const allSfOk = done === sfScenes.length;
+  setStatus(allSfOk ? `✅ Short Film xong ${done} cảnh!` : `Film: ${done}/${sfScenes.length}`, allSfOk ? 'green' : 'orange');
+  addLog(sfLogEl, `\n══ Hoàn tất: ${done}/${sfScenes.length} cảnh ══`, allSfOk ? 'ok' : 'warn');
+
+  if (downloadedFiles.length > 0) sfShowExport(downloadedFiles);
+}
+
+// ── Export guide ──────────────────────────────────────────────────────────────
+function sfShowExport(files) {
+  sfExportCard.classList.add('show');
+  const fileList = files.map(f => `file '${f.filename}'`).join('\n');
+  const cmd = `# 1. Tạo file danh sách:\necho "${fileList.replace(/'/g, '"')}" > filelist.txt\n\n# 2. Ghép thành phim:\nffmpeg -f concat -safe 0 -i filelist.txt -c copy short_film.mp4`;
+  sfFfmpegCmd.textContent = cmd;
+  sfExportList.innerHTML = '';
+  files.forEach((f, i) => {
+    const div = document.createElement('div');
+    div.className = 'sf-export-item ready';
+    div.innerHTML = `<div class="dot green"></div> Cảnh ${i+1}: <strong>${f.filename}</strong>`;
+    sfExportList.appendChild(div);
+  });
+}
+
+// ── Scene save/load ───────────────────────────────────────────────────────────
+function saveScenes() {
+  const lightweight = sfScenes.map(s => ({
+    id: s.id, title: s.title, shot: s.shot, camera: s.camera,
+    prompt: s.prompt, status: 'idle', chainDataUrl: null, genFrameDataUrl: null,
+  }));
+  chrome.storage.local.set({ sfScenes: lightweight, sfSceneIdCounter });
+}
+
 // ── DOWNLOAD HISTORY ──────────────────────────────────────────────────────────
 function renderDownloads() {
   footerDlCount.textContent = `${downloadHistory.length} file đã tải`;
@@ -1516,9 +1970,34 @@ i2vResetBtn.addEventListener('click', () => {
 
 // Settings
 [delayInput, timeoutInput].forEach(el => el.addEventListener('change', saveSettings));
-[autoSubmit, autoDownload, waitGenerate, imgAutoDL, imgWaitGen, i2vAutoDL, i2vWaitGen]
-  .forEach(el => el.addEventListener('change', saveSettings));
+[autoSubmit, autoDownload, waitGenerate, imgAutoDL, imgWaitGen, i2vAutoDL, i2vWaitGen,
+ sfAutoDL, sfChaining, sfWaitGen].forEach(el => el.addEventListener('change', saveSettings));
+[sfDelayInput, sfTimeoutInput].forEach(el => el.addEventListener('change', saveSettings));
 clearDlBtn.addEventListener('click', () => { downloadHistory = []; renderDownloads(); });
+
+// Short Film
+sfRunBtn.addEventListener('click', runShortFilm);
+sfStopBtn.addEventListener('click', () => { sfStopReq = true; sfStopBtn.disabled = true; });
+sfResetBtn.addEventListener('click', () => {
+  sfScenes.forEach(s => { s.status = 'idle'; s.genFrameDataUrl = null; sfSetSceneStatus(s.id, 'idle'); });
+  sfProgWrap.classList.remove('show'); sfLogEl.innerHTML = '';
+  sfExportCard.classList.remove('show'); sfGuardBanner.classList.remove('show');
+  setStatus('Reset xong', 'orange'); saveScenes();
+});
+$('sf-collapse-all-btn').addEventListener('click', () => {
+  const bodies = document.querySelectorAll('.sf-scene-card .sf-scene-body');
+  const anyVisible = Array.from(bodies).some(b => !b.classList.contains('collapsed'));
+  bodies.forEach(b => b.classList.toggle('collapsed', anyVisible));
+});
+$('sf-clear-all-btn').addEventListener('click', () => {
+  if (sfScenes.length && !confirm(`Xóa tất cả ${sfScenes.length} cảnh?`)) return;
+  sfScenes = []; sfSceneList.innerHTML = ''; sfUpdateSceneCount();
+  sfExportCard.classList.remove('show'); sfGuardBanner.classList.remove('show'); saveScenes();
+});
+$('sf-add-scene-btn').addEventListener('click', () => {
+  if (sfScenes.length >= 20) { alert('Tối đa 20 cảnh!'); return; }
+  sfAddScene(); $(`sf-scene-${sfScenes[sfScenes.length-1].id}`)?.scrollIntoView({ behavior:'smooth' });
+});
 
 // ── SETTINGS SAVE / LOAD ──────────────────────────────────────────────────────
 function saveSettings() {
@@ -1536,6 +2015,12 @@ function saveSettings() {
     savedImgRatio: imgSelectedRatio,
     savedI2vRatio: i2vSelectedRatio,
     savedI2vDuration: i2vSelectedDuration,
+    // Short Film
+    sfDelay: sfDelayInput.value,
+    sfTimeout: sfTimeoutInput.value,
+    sfAutoDLSetting: sfAutoDL.checked,
+    sfChainingSetting: sfChaining.checked,
+    sfWaitGenSetting: sfWaitGen.checked,
   });
 }
 
@@ -1558,6 +2043,9 @@ chrome.storage.local.get([
   'savedImgAutoDL', 'savedImgWaitGen',
   'savedI2vAutoDL', 'savedI2vWaitGen',
   'savedRatio', 'savedImgRatio', 'savedI2vRatio', 'savedI2vDuration',
+  // Short Film
+  'sfChar', 'sfWorld', 'sfStyle', 'sfScenes', 'sfSceneIdCounter',
+  'sfDelay', 'sfTimeout', 'sfAutoDLSetting', 'sfChainingSetting', 'sfWaitGenSetting',
 ], data => {
   if (data.savedPrompts) promptsInput.value = data.savedPrompts;
   if (data.savedImgPrompts) imgPromptsInput.value = data.savedImgPrompts;
@@ -1578,6 +2066,26 @@ chrome.storage.local.get([
   if (data.savedImgRatio) { imgSelectedRatio = data.savedImgRatio; applyRatioPill('img-ratio-pills', imgSelectedRatio); }
   if (data.savedI2vRatio) { i2vSelectedRatio = data.savedI2vRatio; applyRatioPill('i2v-ratio-pills', i2vSelectedRatio); }
   if (data.savedI2vDuration) { i2vSelectedDuration = data.savedI2vDuration; applyDurBtn('i2v-dur-btns', i2vSelectedDuration); }
+
+  // Short Film Bible
+  if (data.sfChar)  sfCharEl.value  = data.sfChar;
+  if (data.sfWorld) sfWorldEl.value = data.sfWorld;
+  if (data.sfStyle) sfStyleEl.value = data.sfStyle;
+  updateAnchorPreview();
+
+  // Short Film settings
+  if (data.sfDelay)   sfDelayInput.value   = data.sfDelay;
+  if (data.sfTimeout) sfTimeoutInput.value = data.sfTimeout;
+  if (data.sfAutoDLSetting   !== undefined) sfAutoDL.checked   = data.sfAutoDLSetting;
+  if (data.sfChainingSetting !== undefined) sfChaining.checked  = data.sfChainingSetting;
+  if (data.sfWaitGenSetting  !== undefined) sfWaitGen.checked   = data.sfWaitGenSetting;
+
+  // Restore scenes
+  if (data.sfScenes?.length) {
+    sfSceneIdCounter = data.sfSceneIdCounter || data.sfScenes.length;
+    data.sfScenes.forEach(s => { sfScenes.push(s); renderSceneCard(s, sfScenes.length-1); });
+    sfUpdateSceneCount();
+  }
 
   // Update counts
   const vp = parsePrompts(promptsInput.value);
