@@ -690,7 +690,7 @@ async function readGrokProgress(tabId) {
 }
 
 // ── WAIT FOR VIDEO GENERATE ───────────────────────────────────────────────────
-async function waitForGenerate(tabId, timeoutMs, knownVideoUrls = new Set(), stopFlagFn, progressCallback = null) {
+async function waitForGenerate(tabId, timeoutMs, knownVideoUrls = new Set(), stopFlagFn, progressCallback = null, options = {}) {
   const pollInterval = 1200;
   const start = Date.now();
   let lastSpinnerTime = Date.now();
@@ -781,22 +781,22 @@ async function waitForGenerate(tabId, timeoutMs, knownVideoUrls = new Set(), sto
       if (r.hasNewVideo) { console.log('[GPI-SF] ✅ Done: new video detected'); return { ok: true, reason: 'new-video' }; }
 
       // 2. New image appeared (image mode)
-      if (r.newImgUrls?.length > 0 && elapsed > 5000) {
+      if (!options.requireNewVideo && r.newImgUrls?.length > 0 && elapsed > 5000) {
         console.log('[GPI-SF] ✅ Done: new image detected', r.newImgUrls.length);
         return { ok: true, reason: 'new-image' };
       }
 
       // 3. Download button appeared
-      if (r.dlReady && elapsed > 8000) { console.log('[GPI-SF] ✅ Done: download btn'); return { ok: true, reason: 'dl-btn' }; }
+      if (!options.requireNewVideo && r.dlReady && elapsed > 8000) { console.log('[GPI-SF] ✅ Done: download btn'); return { ok: true, reason: 'dl-btn' }; }
 
       // 4. Spinner gone + button re-enabled (transition: disabled→enabled)
-      if (btnWasDisabled && r.genReady && silentMs > 5000 && elapsed > 10000) {
+      if (!options.requireNewVideo && btnWasDisabled && r.genReady && silentMs > 5000 && elapsed > 10000) {
         console.log('[GPI-SF] ✅ Done: btn transition disabled→enabled, silent', silentMs);
         return { ok: true, reason: 'btn-transition' };
       }
 
       // 5. Long silence (no spinners) + button ready
-      if (silentMs > 12000 && r.genReady && elapsed > 15000) {
+      if (!options.requireNewVideo && silentMs > 12000 && r.genReady && elapsed > 15000) {
         console.log('[GPI-SF] ✅ Done: long silence fallback');
         return { ok: true, reason: 'silence-fallback' };
       }
@@ -1117,7 +1117,8 @@ async function runInjector() {
 
       const gen = await waitForGenerate(tab.id, tmOut, knownVideoUrls,
         () => stopRequested,
-        (pct) => { if (pbar) pbar.style.width = pct + '%'; }
+        (pct) => { if (pbar) pbar.style.width = pct + '%'; },
+        { requireNewVideo: true }
       );
 
       if (gen.ok) {
@@ -1555,7 +1556,8 @@ async function runImg2Vid() {
 
       const gen = await waitForGenerate(tab.id, tmOut, knownVideoUrls,
         () => i2vStopReq,
-        (pct) => { if (pprog) pprog.style.width = pct + '%'; }
+        (pct) => { if (pprog) pprog.style.width = pct + '%'; },
+        { requireNewVideo: true }
       );
 
       if (gen.ok) {
