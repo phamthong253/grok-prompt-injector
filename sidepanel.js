@@ -396,6 +396,7 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: (promptText, doSubmit) => {
+      console.log('[GPI] injectTextPrompt START', { doSubmit, promptLen: promptText.length });
       const selectors = [
         'textarea[placeholder*="Imagine"]', 'textarea[placeholder*="Describe"]',
         'textarea[placeholder*="Enter"]',
@@ -406,19 +407,24 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
       for (const sel of selectors) {
         for (const c of document.querySelectorAll(sel)) {
           const r = c.getBoundingClientRect();
-          if (r.width > 0 && r.height > 0) { el = c; break; }
+          if (r.width > 0 && r.height > 0) {
+            console.log('[GPI] Found input:', sel, c.tagName, `${r.width}x${r.height}`);
+            el = c; break;
+          }
         }
         if (el) break;
       }
-      if (!el) return { ok: false, error: 'Không tìm thấy hộp nhập prompt' };
+      if (!el) { console.error('[GPI] ❌ No input found!'); return { ok: false, error: 'Không tìm thấy hộp nhập prompt' }; }
 
       el.focus();
       if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+        console.log('[GPI] Using TEXTAREA setter');
         const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
         if (setter) setter.call(el, promptText); else el.value = promptText;
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
       } else {
+        console.log('[GPI] Using contenteditable insertText');
         el.innerHTML = '';
         document.execCommand('insertText', false, promptText);
         if (!el.textContent.trim()) {
@@ -426,14 +432,18 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
           el.dispatchEvent(new InputEvent('input', { bubbles: true, data: promptText }));
         }
       }
+      console.log('[GPI] Text injected, content length:', el.textContent?.length || el.value?.length);
 
-      if (!doSubmit) return { ok: true };
+      if (!doSubmit) { console.log('[GPI] doSubmit=false, returning'); return { ok: true }; }
 
+      console.log('[GPI] Starting submit button search...');
       return new Promise(resolve => {
         let attempts = 0;
         let submitted = false;
         const tryClick = () => {
           if (submitted) return;
+          attempts++;
+          console.log(`[GPI] Submit attempt #${attempts}`);
 
           // 1. Try aria-label selectors (legacy Grok versions)
           const btnsels = [
@@ -443,34 +453,42 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
           ];
           for (const s of btnsels) {
             const b = document.querySelector(s);
+            if (b) console.log(`[GPI]   aria sel "${s}": found, disabled=${b.disabled}`);
             if (b && !b.disabled) {
+              console.log('[GPI] ✅ CLICK aria-button:', s);
               b.click(); submitted = true;
-              resolve({ ok: true, method: 'aria-button' }); return;
+              resolve({ ok: true, method: 'aria-button', sel: s }); return;
             }
           }
 
           // 2. Find submit button inside form (current Grok 2025 layout)
           const forms = document.querySelectorAll('form');
+          console.log(`[GPI]   forms found: ${forms.length}`);
           for (const form of forms) {
-            // Look for the button in the absolute-positioned action bar
             const actionBtns = form.querySelectorAll('div.absolute button');
+            console.log(`[GPI]   form actionBtns: ${actionBtns.length}`);
             for (const b of actionBtns) {
-              if (!b.disabled && b.querySelector('svg')) {
+              const hasSvg = !!b.querySelector('svg');
+              console.log(`[GPI]     btn disabled=${b.disabled} hasSvg=${hasSvg} class="${b.className.slice(0,60)}"`);
+              if (!b.disabled && hasSvg) {
+                console.log('[GPI] ✅ CLICK form-svg-button');
                 b.click(); submitted = true;
                 resolve({ ok: true, method: 'form-svg-button' }); return;
               }
             }
-            // Fallback: any button inside form that's not disabled
             const allFormBtns = form.querySelectorAll('button:not([disabled])');
+            console.log(`[GPI]   form all enabled btns: ${allFormBtns.length}`);
             if (allFormBtns.length > 0) {
-              const btn = allFormBtns[allFormBtns.length - 1]; // last button is usually submit
+              const btn = allFormBtns[allFormBtns.length - 1];
+              console.log('[GPI] ✅ CLICK form-last-button:', btn.className.slice(0,60));
               btn.click(); submitted = true;
               resolve({ ok: true, method: 'form-last-button' }); return;
             }
           }
 
           // 3. Last resort: Enter key
-          if (++attempts >= 15) {
+          if (attempts >= 15) {
+            console.log('[GPI] ⚠ Max attempts reached, using Enter key fallback');
             if (!submitted) {
               el.focus();
               el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
@@ -495,14 +513,18 @@ async function injectImageToPage(tabId, dataUrl, mimeType, fileName) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: async (dataUrl, mimeType, fileName) => {
+      console.log('[GPI] injectImageToPage START', { fileName, mimeType, dataUrlLen: dataUrl?.length });
       const res = await fetch(dataUrl);
       const blob = await res.blob();
       const file = new File([blob], fileName, { type: mimeType });
+      console.log('[GPI] File created:', file.name, file.size, 'bytes');
 
       let fileInput = document.querySelector('input[type="file"][accept*="image"]')
         || document.querySelector('input[type="file"]');
+      console.log('[GPI] fileInput found (initial):', !!fileInput, fileInput?.accept);
 
       if (!fileInput) {
+        console.log('[GPI] No file input, trying trigger buttons...');
         const triggers = [
           'button[aria-label*="image"]', 'button[aria-label*="Image"]',
           'button[aria-label*="upload"]', 'button[aria-label*="attach"]',
@@ -510,23 +532,30 @@ async function injectImageToPage(tabId, dataUrl, mimeType, fileName) {
         ];
         for (const s of triggers) {
           const btn = document.querySelector(s);
-          if (btn) { btn.click(); await new Promise(r => setTimeout(r, 600)); break; }
+          if (btn) {
+            console.log('[GPI] Trigger clicked:', s);
+            btn.click(); await new Promise(r => setTimeout(r, 600)); break;
+          }
         }
         fileInput = document.querySelector('input[type="file"][accept*="image"]')
           || document.querySelector('input[type="file"]');
+        console.log('[GPI] fileInput found (after trigger):', !!fileInput);
       }
 
-      if (!fileInput) return { ok: false, error: 'Không tìm thấy input file' };
+      if (!fileInput) { console.error('[GPI] ❌ No file input!'); return { ok: false, error: 'Không tìm thấy input file' }; }
       const dt = new DataTransfer();
       dt.items.add(file);
       fileInput.files = dt.files;
       fileInput.dispatchEvent(new Event('change', { bubbles: true }));
       fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+      console.log('[GPI] ✅ Image injected OK');
       return { ok: true };
     },
     args: [dataUrl, mimeType, fileName],
   });
-  return results?.[0]?.result || { ok: false, error: 'Script thất bại' };
+  const imgResult = results?.[0]?.result || { ok: false, error: 'Script thất bại' };
+  console.log('[GPI-sidepanel] injectImageToPage result:', imgResult);
+  return imgResult;
 }
 
 // ── SNAPSHOT URLS ─────────────────────────────────────────────────────────────
@@ -1912,10 +1941,16 @@ async function runShortFilm() {
     sfSetSceneStatus(scene.id, 'running');
     $(`sf-scene-${scene.id}`)?.scrollIntoView({ behavior:'smooth', block:'nearest' });
 
+    console.log(`[GPI-SF] ═══ SCENE ${i+1}/${sfScenes.length} ═══`, scene.title || '');
+
     // ★ Scroll page to bottom & ensure clean input for next scene
+    console.log('[GPI-SF] Scrolling page to bottom...');
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => { window.scrollTo(0, document.body.scrollHeight); },
+      func: () => {
+        console.log('[GPI] scrollTo bottom, body.scrollHeight:', document.body.scrollHeight);
+        window.scrollTo(0, document.body.scrollHeight);
+      },
     });
     await sleep(500);
 
@@ -1924,6 +1959,7 @@ async function runShortFilm() {
     const sceneLabel = `[SCENE ${i+1}${scene.title ? ' — ' + scene.title : ''}]`;
     const fullPrompt = `${anchor}\n${shotLine}\n${sceneLabel} ${scene.prompt.trim()}`;
 
+    console.log('[GPI-SF] fullPrompt length:', fullPrompt.length);
     addLog(sfLogEl, `\n▶ CẢNH ${i+1}${scene.title ? ' — ' + scene.title : ''}`, 'ok');
     addLog(sfLogEl, `  Shot: ${scene.shot} | Cam: ${scene.camera}`);
     addLog(sfLogEl, `  Prompt: ${scene.prompt.slice(0,55)}...`);
