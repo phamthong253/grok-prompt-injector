@@ -1633,6 +1633,7 @@ let sfSceneIdCounter = 0;
 // Characters: [{id, name, description, role:'main'|'sub', imageDataUrl, imageFileName}]
 let sfCharacters = [];
 let sfCharIdCounter = 0;
+let sfMessageStates = new Map();
 
 const SHOT_TYPES = [
   'Extreme Wide Shot (EWS)', 'Wide Shot (WS)', 'Medium Wide Shot (MWS)',
@@ -2014,8 +2015,17 @@ async function runShortFilm() {
   if (!sfCharacters.length && !sfWorldEl.value.trim() && !sfStyleEl.value.trim())
     errors.push('Character Bible trống — thêm ít nhất 1 nhân vật hoặc bối cảnh');
 
+  const charErrors = (window.ShortFilmLogic?.validateCharacterRefs || (() => []))(sfCharacters);
+  errors.push(...charErrors);
+
   if (errors.length) {
-    sfGuardBanner.innerHTML = '⚠ <strong>Không thể chạy:</strong><br>' + errors.map(e => `• ${e}`).join('<br>');
+    sfGuardBanner.textContent = '';
+    const title = document.createElement('div');
+    title.textContent = '⚠ Không thể chạy:';
+    sfGuardBanner.appendChild(title);
+    const ul = document.createElement('ul');
+    errors.forEach(e => { const li = document.createElement('li'); li.textContent = e; ul.appendChild(li); });
+    sfGuardBanner.appendChild(ul);
     sfGuardBanner.classList.add('show');
     return;
   }
@@ -2042,13 +2052,17 @@ async function runShortFilm() {
   const downloadedFiles = [];
   let prevFrameDataUrl  = null;
   let done = 0;
+  const sceneQueue = (window.ShortFilmLogic?.normalizeSceneQueue || (x => [...x]))(sfScenes);
+  sfMessageStates = new Map(sceneQueue.map(s => [s.id, (window.ShortFilmLogic?.createMessageState || ((id) => ({id, status: "pending", error: null})))(s.id)]));
 
-  for (let i = 0; i < sfScenes.length; i++) {
+  for (let i = 0; i < sceneQueue.length; i++) {
     if (sfStopReq) { addLog(sfLogEl, `⏹ Dừng tại cảnh ${i+1}`, 'warn'); break; }
 
-    const scene = sfScenes[i];
+    const scene = sceneQueue[i];
+    const msgState = sfMessageStates.get(scene.id);
     try {
       sfSetSceneStatus(scene.id, 'running');
+      if (msgState) msgState.status = 'running';
       $(`sf-scene-${scene.id}`)?.scrollIntoView({ behavior:'smooth', block:'nearest' });
 
       console.log(`[GPI-SF] ═══ SCENE ${i+1}/${sfScenes.length} ═══`, scene.title || '');
@@ -2135,10 +2149,12 @@ ${sceneLabel} ${scene.prompt.trim()}`;
           addLog(sfLogEl, `  ⚠ ${reason}`, 'warn');
           sfSetSceneStatus(scene.id, gen.reason === 'timeout' ? 'timeout' : 'idle');
           // FIFO strict: scene hiện tại chưa xong thì dừng queue.
-          if (gen.reason === 'stopped' || gen.reason === 'timeout') break;
+          if (msgState) msgState.status = gen.reason === 'timeout' ? 'timeout' : 'stopped';
+          if (gen.reason === 'stopped' || gen.reason === 'timeout') { addLog(sfLogEl, '  ⛔ Queue dừng theo policy FIFO strict.', 'warn'); break; }
           generatedOk = false;
         } else {
           addLog(sfLogEl, `  ✅ Generate xong!`, 'ok');
+          if (msgState) msgState.status = 'generated';
         }
 
         if (generatedOk && doChain) {
@@ -2177,11 +2193,14 @@ ${sceneLabel} ${scene.prompt.trim()}`;
         } else {
           downloadHistory.push(...files.map(f => ({ ...f, prompt: `Cảnh ${i+1}: ${scene.prompt.slice(0,40)}` })));
           downloadedFiles.push(...files);
+          if (msgState) msgState.status = 'downloaded';
+          addLog(sfLogEl, `  ✅ Đã tải ${files.length} video cho cảnh ${i+1}`, 'ok');
           renderDownloads();
         }
       }
 
       sfSetSceneStatus(scene.id, 'done');
+      if (msgState && msgState.status !== 'downloaded') msgState.status = 'generated';
       done++;
       setProgress(sfProgBar, sfProgLabel, done, sfScenes.length, 'Cảnh xong');
       saveScenes();
@@ -2193,8 +2212,10 @@ ${sceneLabel} ${scene.prompt.trim()}`;
     } catch (e) {
       addLog(sfLogEl, `  ✗ Lỗi cảnh ${i+1}: ${e.message}`, 'err');
       sfSetSceneStatus(scene.id, 'error');
+      if (msgState) { msgState.status = 'failed'; msgState.error = e.message; }
       $(`sf-serr-${scene.id}`).textContent = `⚠ Runtime error: ${e.message}`;
-      continue;
+      addLog(sfLogEl, '  ⛔ Queue dừng do lỗi scene hiện tại.', 'err');
+      break;
     }
   }
   sfIsRunning = false;
