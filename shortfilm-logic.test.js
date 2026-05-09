@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const { normalizeSceneQueue, validateCharacterRefs, createMessageState } = require('./shortfilm-logic.js');
 
 test('Queue order: scene IDs lộn xộn được sort tăng dần', () => {
@@ -38,4 +39,39 @@ test('Timeout/stop policy: queue dừng đúng', () => {
   const shouldStop = states[0].status === 'timeout' || states[0].status === 'stopped' || states[0].status === 'failed';
   if (shouldStop) states[1].status = 'pending';
   assert.equal(states[1].status, 'pending');
+});
+
+test('Submit injector does not mutate Short Film message state', () => {
+  const sidepanel = fs.readFileSync('./sidepanel.js', 'utf8');
+  const start = sidepanel.indexOf('async function injectTextPrompt');
+  const end = sidepanel.indexOf('async function injectImageToPage');
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const injectTextPromptBody = sidepanel.slice(start, end);
+  assert.doesNotMatch(injectTextPromptBody, /msgState/);
+  assert.doesNotMatch(injectTextPromptBody, /status\s*=\s*['"]downloaded['"]/);
+  assert.doesNotMatch(injectTextPromptBody, /resolve\(\{\s*ok:\s*true,\s*method:\s*['"]enter-fallback['"]/);
+  assert.doesNotMatch(injectTextPromptBody.slice(injectTextPromptBody.indexOf('button.click()')), /submitted\s*=\s*false/);
+});
+
+test('Short Film UI does not expose FFmpeg export command', () => {
+  const sidepanelJs = fs.readFileSync('./sidepanel.js', 'utf8');
+  const sidepanelHtml = fs.readFileSync('./sidepanel.html', 'utf8');
+  assert.doesNotMatch(sidepanelJs, /ffmpeg/i);
+  assert.doesNotMatch(sidepanelHtml, /ffmpeg/i);
+});
+
+test('Short Film requires video generation and download before next scene', () => {
+  const sidepanel = fs.readFileSync('./sidepanel.js', 'utf8');
+  const start = sidepanel.indexOf('async function runShortFilm');
+  const end = sidepanel.indexOf('function sfShowExport');
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const runShortFilmBody = sidepanel.slice(start, end);
+  assert.match(runShortFilmBody, /const doDL\s*=\s*true/);
+  assert.match(runShortFilmBody, /requireNewVideo:\s*true/);
+  assert.match(runShortFilmBody, /downloadMedia\(tab\.id,\s*sceneSlug,\s*['"]video['"]/);
+  assert.match(runShortFilmBody, /Queue.*video.*t.*i xong|Queue.*download/i);
 });

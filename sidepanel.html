@@ -1440,7 +1440,7 @@
       padding:12px 13px; display:none; flex-direction:column; gap:9px; }
     .sf-export-card.show { display:flex; }
     .sf-export-card h3 { font-size:12px; font-weight:700; color:var(--green); }
-    .sf-ffmpeg-cmd { background:var(--bg); border:1px solid var(--border); border-radius:7px;
+    .sf-download-summary { background:var(--bg); border:1px solid var(--border); border-radius:7px;
       padding:9px 11px; font-family:'Courier New',monospace; font-size:10px; color:#a0e0a0;
       white-space:pre-wrap; word-break:break-all; user-select:all; overflow-x:auto; }
     .sf-export-item { display:flex; align-items:center; gap:7px; font-size:11px; color:var(--muted); }
@@ -1807,15 +1807,10 @@ A cat sleeping on a sofa, afternoon light..."></textarea>
         <div class="log-box" id="sf-log"></div>
       </div>
 
-      <!-- 6. Export guide -->
+      <!-- 6. Download summary -->
       <div class="sf-export-card" id="sf-export-card">
-        <h3>✅ Xuất phim hoàn chỉnh</h3>
-        <div style="font-size:11px;color:var(--muted)">Dùng FFmpeg để ghép:</div>
-        <div class="sf-ffmpeg-cmd" id="sf-ffmpeg-cmd"></div>
-        <div style="font-size:10.5px;color:var(--muted);line-height:1.7">
-          💡 <code style="color:var(--accent)">winget install ffmpeg</code> (Win) |
-          <code style="color:var(--accent)">brew install ffmpeg</code> (Mac)
-        </div>
+        <h3>✅ Video cảnh đã tải</h3>
+        <div class="sf-download-summary" id="sf-download-summary"></div>
         <div id="sf-export-list" style="display:flex;flex-direction:column;gap:5px"></div>
       </div>
 

@@ -440,6 +440,46 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
       return new Promise(resolve => {
         let attempts = 0;
         let submitted = false;
+        const maxAttempts = 100; // image/reference uploads can keep Grok's submit button disabled for a while
+        const isVisible = (node) => {
+          if (!node) return false;
+          const r = node.getBoundingClientRect();
+          const st = window.getComputedStyle(node);
+          return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none';
+        };
+        const isEnabled = (button) => {
+          if (!button) return false;
+          return !button.disabled
+            && button.getAttribute('aria-disabled') !== 'true'
+            && !button.closest('[aria-disabled="true"]');
+        };
+        const clickSubmit = (button, method, extra = {}) => {
+          const rect = button.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + rect.height / 2;
+          console.log('[GPI] CLICK submit:', method, {
+            label: button.getAttribute('aria-label') || button.textContent?.trim() || button.className?.slice?.(0, 50),
+            x: Math.round(x), y: Math.round(y), w: Math.round(rect.width), h: Math.round(rect.height)
+          });
+          button.scrollIntoView({ block: 'center', inline: 'center' });
+          button.focus();
+          // One activation only. Retrying after a plausible click can create duplicate Grok jobs.
+          button.click();
+          submitted = true;
+          setTimeout(() => {
+            const currentText = (el.value ?? el.textContent ?? '').trim();
+            const busy = !!document.querySelector('[aria-busy="true"],[class*="loading"],[class*="generating"],[class*="pending"]');
+            const buttonNowDisabled = !isEnabled(button);
+            const looksSubmitted = currentText.length === 0 || buttonNowDisabled || busy;
+            console.log('[GPI] submit verify:', { method, currentLen: currentText.length, buttonNowDisabled, busy, looksSubmitted });
+            resolve({ ok: true, method, verified: looksSubmitted, ...extra });
+          }, 900);
+        };
+        const rightmostButton = (buttons) => {
+          return buttons
+            .map(button => ({ button, rect: button.getBoundingClientRect() }))
+            .sort((a, b) => (b.rect.right - a.rect.right) || (b.rect.bottom - a.rect.bottom))[0]?.button || null;
+        };
         const tryClick = () => {
           if (submitted) return;
           attempts++;
@@ -447,17 +487,19 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
 
           // 1. Try aria-label selectors (legacy Grok versions)
           const btnsels = [
-            'button[aria-label*="Grok"]', 'button[aria-label*="Send"]',
-            'button[aria-label*="Generate"]', 'button[type="submit"]',
-            'button[data-testid*="send"]', 'button[data-testid*="submit"]',
+            'button[aria-label*="Grok" i]', 'button[aria-label*="Send" i]',
+            'button[aria-label*="Generate" i]', 'button[aria-label*="Submit" i]',
+            'button[type="submit"]',
+            'button[data-testid*="send" i]', 'button[data-testid*="submit" i]',
+            'button[data-testid*="generate" i]',
           ];
           for (const s of btnsels) {
-            const b = document.querySelector(s);
-            if (b) console.log(`[GPI]   aria sel "${s}": found, disabled=${b.disabled}`);
-            if (b && !b.disabled) {
+            const matches = Array.from(document.querySelectorAll(s));
+            const b = matches.find(btn => isVisible(btn) && isEnabled(btn));
+            if (matches.length) console.log(`[GPI]   aria sel "${s}": found=${matches.length}, enabled=${!!b}`);
+            if (b && isVisible(b) && isEnabled(b)) {
               console.log('[GPI] ✅ CLICK aria-button:', s);
-              b.click(); submitted = true;
-              resolve({ ok: true, method: 'aria-button', sel: s }); return;
+              clickSubmit(b, 'aria-button', { sel: s }); return;
             }
           }
           // 2. Find submit button inside form — target bottom-right action bar (Grok 2025)
@@ -470,47 +512,55 @@ async function injectTextPrompt(tabId, prompt, doSubmit) {
             const allAbsDivs = Array.from(form.querySelectorAll('div.absolute'));
             const bottomRightDivs = allAbsDivs.filter(d => {
               const cls = d.className || '';
-              return cls.includes('right-') && cls.includes('bottom-');
+              return (cls.includes('right-') || cls.includes('end-')) && cls.includes('bottom-');
             });
             console.log(`[GPI]   bottomRightDivs: ${bottomRightDivs.length}`);
             for (const div of bottomRightDivs) {
-              const btns = Array.from(div.querySelectorAll('button'));
+              const btns = Array.from(div.querySelectorAll('button'))
+                .filter(b => isVisible(b) && isEnabled(b) && b.querySelector('svg'));
+              const rightBtn = rightmostButton(btns);
+              if (rightBtn) {
+                console.log('[GPI] âœ… CLICK bottom-right-rightmost-svg');
+                clickSubmit(rightBtn, 'bottom-right-btn'); return;
+              }
               // Take the LAST enabled SVG button (send is always rightmost)
               for (let k = btns.length - 1; k >= 0; k--) {
                 const b = btns[k];
                 const hasSvg = !!b.querySelector('svg');
-                console.log(`[GPI]     btn[${k}] disabled=${b.disabled} hasSvg=${hasSvg} class="${b.className.slice(0,50)}"`);
-                if (!b.disabled && hasSvg) {
+                console.log(`[GPI]     btn[${k}] disabled=${b.disabled} ariaDisabled=${b.getAttribute('aria-disabled')} hasSvg=${hasSvg} class="${b.className.slice(0,50)}"`);
+                if (isVisible(b) && isEnabled(b) && hasSvg) {
                   console.log('[GPI] ✅ CLICK bottom-right-last-svg');
-                  b.click(); submitted = true;
-                  resolve({ ok: true, method: 'bottom-right-btn' }); return;
+                  clickSubmit(b, 'bottom-right-btn'); return;
                 }
               }
             }
             // Fallback: last enabled SVG button in any absolute div
             const allSvgBtns = Array.from(form.querySelectorAll('div.absolute button'))
-              .filter(b => !b.disabled && b.querySelector('svg'));
+              .filter(b => isVisible(b) && isEnabled(b) && b.querySelector('svg'));
             console.log(`[GPI]   allSvgBtns (enabled): ${allSvgBtns.length}`);
             if (allSvgBtns.length > 0) {
-              const btn = allSvgBtns[allSvgBtns.length - 1];
+              const btn = rightmostButton(allSvgBtns);
               console.log('[GPI] ✅ CLICK last-svg-btn:', btn.className.slice(0,50));
-              btn.click(); submitted = true;
-              resolve({ ok: true, method: 'last-svg-btn' }); return;
+              clickSubmit(btn, 'last-svg-btn'); return;
+            }
+            const enabledFormBtns = Array.from(form.querySelectorAll('button:not([disabled])'))
+              .filter(b => isVisible(b) && isEnabled(b) && b.querySelector('svg'));
+            console.log(`[GPI]   enabled form svg buttons: ${enabledFormBtns.length}`);
+            if (enabledFormBtns.length > 0) {
+              clickSubmit(rightmostButton(enabledFormBtns), 'last-form-svg-btn'); return;
             }
           }
 
           // 3. Last resort: Enter key
-          if (attempts >= 15) {
+          if (attempts >= maxAttempts) {
             console.log('[GPI] ⚠ Max attempts reached, using Enter key fallback');
             if (!submitted) {
               el.focus();
               el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
               el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
-              submitted = true;
             }
-            resolve({ ok: true, method: 'enter-fallback' });
+            resolve({ ok: false, method: 'enter-fallback', error: 'Khong tim thay nut submit dang bat sau khi inject prompt' });
           } else {
-          if (msgState) msgState.status = 'downloaded';
             setTimeout(tryClick, 200);
           }
         };
@@ -1617,7 +1667,7 @@ const sfProgBar    = $('sf-prog-bar');
 const sfProgLabel  = $('sf-prog-label');
 const sfLogEl      = $('sf-log');
 const sfExportCard = $('sf-export-card');
-const sfFfmpegCmd  = $('sf-ffmpeg-cmd');
+const sfDownloadSummary  = $('sf-download-summary');
 const sfExportList = $('sf-export-list');
 const sfAutoDL     = $('sf-auto-download');
 const sfChaining   = $('sf-chaining');
@@ -2036,7 +2086,7 @@ async function runShortFilm() {
   if (!tab) { alert('Hãy mở grok.com → Imagine!'); return; }
 
   const doChain  = sfChaining.checked;
-  const doDL     = sfAutoDL.checked;
+  const doDL     = true; // Short Film FIFO: each generated video must download before the next scene starts.
   const doWaitUI = sfWaitGen.checked;
   const doWait   = true; // FIFO strict: luôn chờ scene hiện tại xong rồi mới qua scene tiếp theo.
   const delay    = Math.max(1000, parseInt(sfDelayInput.value) || 2500);
@@ -2049,6 +2099,8 @@ async function runShortFilm() {
   sfExportCard.classList.remove('show');
   setProgress(sfProgBar, sfProgLabel, 0, sfScenes.length, 'Cảnh xong');
   if (!doWaitUI) addLog(sfLogEl, 'ℹ Short Film luôn chạy FIFO: tự động chờ scene xong trước khi qua scene tiếp theo.', 'warn');
+
+  if (!sfAutoDL.checked) addLog(sfLogEl, 'Short Film FIFO: auto-download is required and will stay on for this run.', 'warn');
 
   const downloadedFiles = [];
   let prevFrameDataUrl  = null;
@@ -2143,7 +2195,8 @@ ${sceneLabel} ${scene.prompt.trim()}`;
         await sleep(2000);
         const gen = await waitForGenerate(tab.id, tmOut, knownVids,
           () => sfStopReq,
-          () => {}
+          () => {},
+          { requireNewVideo: true }
         );
         if (!gen.ok) {
           const reason = gen.reason === 'timeout' ? 'Timeout' : 'Đã dừng';
@@ -2159,6 +2212,7 @@ ${sceneLabel} ${scene.prompt.trim()}`;
         }
 
         if (generatedOk && doChain) {
+          await sleep(1500);
           addLog(sfLogEl, `  📸 Capture frame cuối...`, 'chain');
           const capture = await captureLastFrame(tab.id);
           if (capture.ok) {
@@ -2175,22 +2229,28 @@ ${sceneLabel} ${scene.prompt.trim()}`;
         }
       }
 
-      // Step E: Download independent from doWait. Retry to avoid late URL hydration.
+      // Step E: Short Film FIFO requires download success before the next scene starts.
       if (doDL && generatedOk) {
         setStatus(`⬇ Tải cảnh ${i+1}...`, 'orange');
+        addLog(sfLogEl, `  Download video scene ${i+1} before continuing...`);
         const knownImgs = await snapshotImageUrls(tab.id);
         const sceneSlug = `scene${String(i+1).padStart(2,'0')}_${slugify(scene.title||scene.prompt)}`;
         let files = [];
-        for (let attempt = 1; attempt <= 3; attempt++) {
+        for (let attempt = 1; attempt <= 5; attempt++) {
           files = await downloadMedia(tab.id, sceneSlug, 'video', knownVids, knownImgs);
           if (files.length > 0) break;
-          if (attempt < 3) {
-            addLog(sfLogEl, `  ⏳ Chờ media ổn định (${attempt}/3)...`, 'warn');
-            await sleep(1500);
+          if (attempt < 5) {
+            addLog(sfLogEl, `  ⏳ Chờ media ổn định (${attempt}/5)...`, 'warn');
+            await sleep(2500);
           }
         }
         if (files.length === 0) {
           addLog(sfLogEl, `  ⚠ Chưa tải được video mới cho cảnh ${i+1}`, 'warn');
+          if (msgState) msgState.status = 'failed';
+          sfSetSceneStatus(scene.id, 'error');
+          $(`sf-serr-${scene.id}`).textContent = `Không tải được video cảnh ${i+1}`;
+          addLog(sfLogEl, '  ⛔ Queue dừng: chỉ chạy cảnh tiếp theo sau khi video đã tải xong.', 'err');
+          break;
         } else {
           downloadHistory.push(...files.map(f => ({ ...f, prompt: `Cảnh ${i+1}: ${scene.prompt.slice(0,40)}` })));
           downloadedFiles.push(...files);
@@ -2231,9 +2291,7 @@ ${sceneLabel} ${scene.prompt.trim()}`;
 // ── Export guide ──────────────────────────────────────────────────────────────
 function sfShowExport(files) {
   sfExportCard.classList.add('show');
-  const fileList = files.map(f => `file '${f.filename}'`).join('\n');
-  const cmd = `# 1. Tạo file danh sách:\necho "${fileList.replace(/'/g, '"')}" > filelist.txt\n\n# 2. Ghép thành phim:\nffmpeg -f concat -safe 0 -i filelist.txt -c copy short_film.mp4`;
-  sfFfmpegCmd.textContent = cmd;
+  if (sfDownloadSummary) sfDownloadSummary.textContent = `${files.length} video cảnh đã tải xong.`;
   sfExportList.innerHTML = '';
   files.forEach((f, i) => {
     const div = document.createElement('div');
