@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
   <title>Grok Prompt Injector</title>
   <style>
     *,
@@ -858,11 +859,17 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 9px 11px;
-      max-height: 130px;
+      max-height: 260px;
+      min-height: 180px;
       overflow-y: auto;
-      font-size: 11px;
-      line-height: 1.9;
+      font-size: 11.5px;
+      line-height: 1.75;
       color: var(--dimmed);
+    }
+
+    #sf-log {
+      max-height: 320px;
+      min-height: 220px;
     }
 
     .log-box::-webkit-scrollbar {
@@ -1459,6 +1466,986 @@
       font-size: 10px;
       color: var(--dimmed);
     }
+    /* ══ GROK GUARD OVERLAY ══ */
+    #grok-guard-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+    }
+    #grok-guard-overlay.show { display: flex; }
+    #grok-guard-overlay::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(10, 10, 14, 0.75);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+    .ggo-box {
+      position: relative;
+      z-index: 1;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 22px 24px;
+      width: 230px;
+      text-align: center;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.7), 0 0 0 1px #7c6aff22;
+    }
+    .ggo-icon { font-size: 36px; margin-bottom: 12px; }
+    .ggo-title {
+      font-size: 15px; font-weight: 700; color: var(--text);
+      margin-bottom: 10px;
+    }
+    .ggo-desc {
+      font-size: 12px; color: var(--muted); line-height: 1.6;
+      margin-bottom: 20px;
+    }
+    .ggo-desc strong { color: var(--text); }
+    #ggo-goto-btn {
+      width: 100%;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff; border: none; border-radius: 9px;
+      padding: 10px 0; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: opacity .2s;
+      letter-spacing: .02em;
+    }
+    #ggo-goto-btn:hover { opacity: .85; }
+
+    /* ══ SETTINGS TAB ══ */
+    .set-section {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .set-section-title {
+      font-size: 10px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .08em;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .set-row {
+      display: flex; align-items: center;
+      justify-content: space-between; gap: 8px;
+    }
+    .set-label {
+      font-size: 12px; color: var(--text); flex: 1; line-height: 1.4;
+    }
+    .set-pills {
+      display: flex; gap: 5px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end;
+    }
+    .settings-action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .set-pill {
+      font-size: 11px; font-weight: 600;
+      padding: 4px 11px; border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg3); color: var(--muted);
+      cursor: pointer; transition: all .15s; white-space: nowrap;
+      user-select: none;
+    }
+    .set-pill:hover { border-color: var(--accent); color: var(--text); }
+    .set-pill.active {
+      border-color: var(--accent);
+      background: #7c6aff1a;
+      color: var(--accent);
+    }
+    .set-stepper {
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    }
+    .set-step-btn {
+      width: 26px; height: 26px; border-radius: 50%;
+      border: 1px solid var(--border); background: var(--bg3);
+      color: var(--text); font-size: 16px; font-weight: 700;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: border-color .15s;
+    }
+    .set-step-btn:hover { border-color: var(--accent); }
+    .set-step-val {
+      font-size: 16px; font-weight: 700; color: var(--accent);
+      min-width: 20px; text-align: center;
+    }
+    .set-dl-gear-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 13px;
+      cursor: pointer; transition: all .15s; flex-shrink: 0;
+    }
+    .set-dl-gear-btn:hover { border-color: var(--accent); color: var(--text); }
+    /* Blue side-queue redesign overrides */
+    :root {
+      --bg: #0f172a;
+      --bg2: #111827;
+      --bg3: #1e293b;
+      --bg4: #243047;
+      --border: #334155;
+      --accent: #2563eb;
+      --accent2: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.16);
+      --text: #e5edf7;
+      --muted: #94a3b8;
+      --dimmed: #64748b;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --cyan: #38bdf8;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+    }
+
+    .header,
+    .statusbar,
+    .footer {
+      background: #0b1220;
+      border-color: var(--border);
+    }
+
+    .logo,
+    .version-badge,
+    .prog-bar,
+    .i2v-pair-prog {
+      background: linear-gradient(135deg, var(--accent), var(--accent2)) !important;
+      box-shadow: none;
+    }
+
+    .body { padding: 14px; gap: 14px; }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(118px, 1fr));
+      gap: 8px;
+      padding: 10px 12px;
+      background: #0b1220;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+
+    .tab {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--bg3);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.25;
+      white-space: normal;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab:hover:not(.active) {
+      color: var(--text);
+      border-color: rgba(59, 130, 246, .55);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, .08);
+    }
+
+    .tab.active {
+      background: linear-gradient(135deg, rgba(37, 99, 235, .95), rgba(59, 130, 246, .9));
+      border-color: var(--accent2);
+      color: #fff;
+      box-shadow: 0 12px 30px rgba(37, 99, 235, .24);
+    }
+
+    .tab-title { display: block; }
+
+    .card,
+    .setting-card,
+    .info-card,
+    .sf-bible-card,
+    .sf-scene-card,
+    .sf-export-card,
+    .i2v-pair,
+    .img-item,
+    .q-item {
+      background: var(--bg3);
+      border-color: var(--border);
+      border-radius: 12px;
+    }
+
+    textarea,
+    input[type='number'],
+    input[type='text'],
+    select,
+    .sf-textarea,
+    .sf-scene-prompt,
+    .sf-select,
+    .sf-char-desc {
+      background: var(--bg2) !important;
+      border-color: var(--border) !important;
+      color: var(--text) !important;
+      border-radius: 10px;
+    }
+
+    textarea:focus,
+    input[type='number']:focus,
+    input[type='text']:focus,
+    select:focus,
+    .sf-textarea:focus,
+    .sf-scene-prompt:focus,
+    .sf-select:focus,
+    .sf-char-desc:focus {
+      border-color: var(--accent2) !important;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, .14) !important;
+    }
+
+    .btn {
+      min-height: 38px;
+      border-radius: 10px;
+      font-weight: 800;
+      letter-spacing: 0;
+      transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
+    }
+
+    .btn-primary,
+    .btn-cyan {
+      background: var(--accent) !important;
+      border: 1px solid var(--accent2) !important;
+      color: #fff !important;
+      box-shadow: 0 10px 24px rgba(37, 99, 235, .24);
+    }
+
+    .btn-primary:not(:disabled):hover,
+    .btn-cyan:not(:disabled):hover {
+      background: var(--accent2) !important;
+      transform: translateY(-1px);
+      box-shadow: 0 12px 28px rgba(59, 130, 246, .28);
+    }
+
+    .btn-secondary {
+      background: var(--bg3) !important;
+      border: 1px solid var(--border) !important;
+      color: var(--text) !important;
+    }
+
+    .btn-secondary:not(:disabled):hover {
+      border-color: var(--accent2) !important;
+      background: var(--bg4) !important;
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, .14) !important;
+      border: 1px solid rgba(239, 68, 68, .48) !important;
+      color: #fecaca !important;
+    }
+
+    .toggle input:checked + .tog-slider { background: var(--accent) !important; }
+    .toggle input:checked + .tog-slider::before { background: #fff; }
+
+    #tab-inject.tab-pane.active { display: flex; }
+    .video-workspace {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .video-main-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .prompt-queue-panel {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      min-height: 180px;
+      max-height: 320px;
+      display: flex;
+      flex-direction: column;
+      position: static;
+    }
+
+    .prompt-queue-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    .prompt-queue-title {
+      font-size: 11px;
+      color: #dbeafe;
+      font-weight: 900;
+      letter-spacing: .08em;
+    }
+
+    .prompt-queue-count {
+      font-size: 10.5px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .prompt-queue-list,
+    .prompt-queue-panel .queue-list {
+      overflow-y: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin: 0;
+      min-height: 0;
+    }
+
+    .prompt-queue-list:empty::before {
+      content: 'Chưa có prompt';
+      color: var(--dimmed);
+      font-size: 12px;
+      padding: 12px;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .prompt-queue-item,
+    .prompt-queue-panel .q-item {
+      padding: 0;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      background: transparent;
+      overflow: hidden;
+      transition: background .15s ease, border-color .15s ease;
+    }
+
+    .prompt-queue-item:hover,
+    .prompt-queue-panel .q-item:hover {
+      background: rgba(148, 163, 184, .05);
+      border-color: rgba(148, 163, 184, .18);
+    }
+
+    .prompt-queue-item.active,
+    .prompt-queue-item.running,
+    .prompt-queue-panel .q-item.running {
+      background: rgba(37, 99, 235, .12);
+      border-color: rgba(59, 130, 246, .45);
+    }
+
+    .prompt-queue-panel .q-item.success { border-color: rgba(16,185,129,.35); }
+    .prompt-queue-panel .q-item.error,
+    .prompt-queue-panel .q-item.timeout { border-color: rgba(239,68,68,.38); }
+
+    .prompt-queue-row,
+    .prompt-queue-panel .q-item-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 12px;
+      background: transparent;
+      border-bottom: none;
+    }
+
+    .prompt-queue-num,
+    .prompt-queue-panel .q-item-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: #334155;
+      color: #dbeafe;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+
+    .prompt-queue-main { flex: 1; min-width: 0; }
+    .prompt-queue-item-title {
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .queue-thumb {
+      width: 48px;
+      height: 42px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      overflow: hidden;
+      color: #64748b;
+      font-size: 9px;
+      font-weight: 750;
+      text-align: center;
+      line-height: 1.2;
+    }
+
+    .queue-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .queue-thumb.has-image {
+      border-color: rgba(59,130,246,.45);
+      background: rgba(59,130,246,.08);
+    }
+
+    .img-result-thumbs {
+      display: flex;
+      gap: 4px;
+      margin-top: 6px;
+      min-height: 28px;
+    }
+
+    .img-result-thumb {
+      width: 28px;
+      height: 28px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg3);
+    }
+
+    .queue-thumb.i2v-queue-import {
+      appearance: none;
+      padding: 0;
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color .16s, background .16s, color .16s, transform .16s;
+    }
+
+    .queue-thumb.i2v-queue-import:hover {
+      border-color: rgba(96,165,250,.85);
+      background: rgba(37,99,235,.16);
+      color: #bfdbfe;
+      transform: translateY(-1px);
+    }
+
+    .queue-thumb.i2v-queue-import:focus-visible {
+      outline: 2px solid rgba(96,165,250,.9);
+      outline-offset: 2px;
+    }
+
+    .queue-prompt-preview {
+      margin-top: 3px;
+      color: #cbd5e1;
+      font-size: 10.5px;
+      line-height: 1.45;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+    }
+
+    .prompt-queue-item-meta {
+      color: var(--dimmed);
+      font-size: 10.5px;
+      margin-top: 2px;
+    }
+
+    .prompt-status-badge,
+    .prompt-queue-panel .q-item-status {
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 10px;
+      font-weight: 800;
+      border: 0;
+      background: rgba(16,185,129,.16);
+      color: #34d399;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .prompt-status-badge.ready { background: rgba(16,185,129,.16); color: #34d399; }
+    .prompt-status-badge.running,
+    .prompt-queue-panel .q-item.running .q-item-status { background: rgba(59,130,246,.18); color: #60a5fa; }
+    .prompt-status-badge.error,
+    .prompt-queue-panel .q-item.error .q-item-status,
+    .prompt-queue-panel .q-item.timeout .q-item-status { background: rgba(239,68,68,.16); color: #f87171; }
+    .prompt-status-badge.done,
+    .prompt-queue-panel .q-item.success .q-item-status { background: rgba(16,185,129,.2); color: #6ee7b7; }
+
+    .prompt-queue-panel .q-item-body {
+      padding: 0 12px 10px 46px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+      max-height: 52px;
+      overflow: hidden;
+    }
+
+    .prompt-queue-panel .q-prog-bar-bg {
+      height: 3px;
+      background: rgba(51,65,85,.7);
+    }
+
+    .prompt-queue-panel .q-prog-bar {
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+    }
+
+    .hidden-setting-card,
+    #tab-inject > .ratio-card,
+    #tab-image > .ratio-card,
+    #tab-img2vid > .ratio-card {
+      display: none !important;
+    }
+
+    .q-actions,
+    .queue-actions,
+    .q-item-actions,
+    .prompt-actions,
+    .q-item a,
+    .q-item .edit,
+    .q-item .copy,
+    .q-item .delete,
+    .q-edit,
+    .q-copy,
+    .q-delete,
+    .q-dur-row {
+      display: none !important;
+    }
+
+    .i2v-pair-status {
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 10px;
+      font-weight: 800;
+      background: rgba(16,185,129,.16);
+      color: #34d399;
+    }
+
+    .i2v-pair.running .i2v-pair-status { background: rgba(59,130,246,.18); color: #60a5fa; }
+    .i2v-pair.error .i2v-pair-status { background: rgba(239,68,68,.16); color: #f87171; }
+    .i2v-pair.success .i2v-pair-status { background: rgba(16,185,129,.2); color: #6ee7b7; }
+
+    .sf-char-role.main,
+    .sf-anchor-preview,
+    .sf-add-btn:hover {
+      border-color: rgba(59, 130, 246, .35) !important;
+      color: var(--accent2) !important;
+      background: rgba(59, 130, 246, .08) !important;
+    }
+
+    .log-box {
+      max-height: 260px;
+      min-height: 180px;
+      font-size: 11.5px;
+      line-height: 1.75;
+      background: #0b1220;
+      border-color: var(--border);
+    }
+
+    #sf-log,
+    #i2v-log { max-height: 320px; min-height: 220px; }
+
+    @media (max-width: 760px) {
+      .tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .prompt-queue-panel { position: static; max-height: 320px; min-height: 220px; }
+    }
+
+    /* Final layout pass: queues sit below the prompt editor, never as a left sidebar. */
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px 12px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      overflow-x: visible;
+    }
+
+    .tab {
+      border-bottom: 1px solid var(--border);
+      white-space: normal;
+    }
+
+    .feature-tab {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 48px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      color: #cbd5e1;
+      font-size: 12.5px;
+      font-weight: 550;
+      line-height: 1.4;
+      transition: background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+    }
+
+    .feature-tab:hover:not(.active) {
+      border-color: rgba(59,130,246,.7);
+      background: #172033;
+      transform: translateY(-1px);
+    }
+
+    .feature-tab.active {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: #fff;
+      border-color: rgba(147,197,253,.9);
+      box-shadow: 0 10px 24px rgba(37,99,235,.24);
+    }
+
+    .feature-tab-icon {
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      border: 1px solid rgba(148,163,184,.38);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: #93c5fd;
+    }
+
+    .feature-tab.active .feature-tab-icon {
+      border-color: rgba(255,255,255,.38);
+      background: rgba(255,255,255,.12);
+      color: #fff;
+    }
+
+    .feature-tab-icon svg {
+      width: 15px;
+      height: 15px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .tab:not(.feature-tab) {
+      min-height: 40px;
+      font-size: 12px;
+      font-weight: 550;
+      border-radius: 10px;
+      background: var(--bg2);
+    }
+
+    #tab-inject.tab-pane.active,
+    #tab-image.tab-pane.active,
+    #tab-img2vid.tab-pane.active,
+    #tab-shortfilm.tab-pane.active {
+      display: flex;
+    }
+
+    .video-workspace {
+      display: flex !important;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .video-main-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .prompt-queue-panel,
+    .img-queue-panel,
+    .i2v-queue-panel,
+    .scene-queue-panel {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 180px;
+      max-height: 320px;
+      position: static;
+    }
+
+    .prompt-queue-header,
+    .img-queue-header,
+    .i2v-queue-header,
+    .scene-queue-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+
+    .prompt-queue-title,
+    .img-queue-title,
+    .i2v-queue-title,
+    .scene-queue-title {
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+
+    .prompt-queue-count,
+    .img-queue-count,
+    .i2v-queue-count,
+    .scene-queue-count {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .prompt-queue-list,
+    .img-queue-list,
+    .i2v-pairs,
+    .sf-scene-list {
+      overflow-y: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      min-height: 0;
+      margin: 0;
+    }
+
+    .prompt-queue-list:empty::before,
+    .img-queue-list:empty::before,
+    .i2v-pairs:empty::before,
+    .sf-scene-list:empty::before {
+      content: 'Chưa có mục nào';
+      color: var(--dimmed);
+      font-size: 12px;
+      padding: 12px;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .feature-local-ratio,
+    .ratio-card.feature-local-ratio,
+    #local-ratio-card,
+    #img-local-ratio-card,
+    #tab-inject .hidden-setting-card,
+    #tab-image > .ratio-card,
+    #tab-img2vid > .ratio-card {
+      display: none !important;
+    }
+
+    .q-actions,
+    .queue-actions,
+    .q-item-actions,
+    .prompt-actions,
+    .q-item .edit,
+    .q-item .copy,
+    .q-item .delete,
+    .i2v-pair-actions,
+    .prompt-queue-actions {
+      display: none !important;
+    }
+
+    .img-item-header,
+    .i2v-pair-header,
+    .sf-scene-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 56px;
+      padding: 10px 12px;
+      border-bottom-color: rgba(51,65,85,.72);
+    }
+
+    .img-item,
+    .i2v-pair,
+    .sf-scene-card {
+      border-radius: 12px;
+      border: 1px solid rgba(51,65,85,.85);
+      background: rgba(30,41,59,.86);
+      overflow: hidden;
+    }
+
+    .img-item.running,
+    .i2v-pair.running,
+    .sf-scene-card.running {
+      border-color: rgba(59,130,246,.5);
+      background: rgba(37,99,235,.10);
+    }
+
+    .img-item.success,
+    .i2v-pair.success,
+    .sf-scene-card.done {
+      border-color: rgba(16,185,129,.36);
+    }
+
+    .img-item.error,
+    .i2v-pair.error,
+    .sf-scene-card.error {
+      border-color: rgba(239,68,68,.45);
+    }
+
+    .img-item-num,
+    .i2v-pair-num,
+    .sf-scene-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: #334155;
+      color: #dbeafe;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+
+    .img-item-status,
+    .i2v-pair-status,
+    .sf-scene-badge {
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 10px;
+      font-weight: 750;
+      background: rgba(16,185,129,.16);
+      color: #34d399;
+      border: 0;
+      white-space: nowrap;
+    }
+
+    .img-item.running .img-item-status,
+    .i2v-pair.running .i2v-pair-status,
+    .sf-scene-card.running .sf-scene-badge {
+      background: rgba(59,130,246,.18);
+      color: #60a5fa;
+    }
+
+    .img-item.error .img-item-status,
+    .i2v-pair.error .i2v-pair-status,
+    .sf-scene-card.error .sf-scene-badge {
+      background: rgba(239,68,68,.16);
+      color: #f87171;
+    }
+
+    .img-item.success .img-item-status,
+    .i2v-pair.success .i2v-pair-status,
+    .sf-scene-card.done .sf-scene-badge {
+      background: rgba(16,185,129,.20);
+      color: #6ee7b7;
+    }
+
+    .i2v-pair-body {
+      display: grid !important;
+      grid-template-columns: 132px minmax(0, 1fr);
+      min-height: 132px;
+      background: rgba(15, 23, 42, .35);
+    }
+
+    .i2v-upload-zone {
+      width: auto !important;
+      min-height: 132px !important;
+      margin: 10px;
+      border: 1px dashed rgba(96,165,250,.56) !important;
+      border-radius: 12px;
+      border-right: 1px dashed rgba(96,165,250,.56) !important;
+      background: rgba(37,99,235,.09);
+      color: #bfdbfe;
+      box-shadow: inset 0 0 0 1px rgba(15,23,42,.25);
+    }
+
+    .i2v-upload-zone:hover {
+      background: rgba(37,99,235,.16) !important;
+      border-color: rgba(147,197,253,.86) !important;
+    }
+
+    .i2v-upload-zone input[type="file"] {
+      z-index: 5;
+    }
+
+    .i2v-upload-icon,
+    .i2v-upload-label {
+      position: relative;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .i2v-upload-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid rgba(147,197,253,.42);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px !important;
+      opacity: 1 !important;
+      background: rgba(15,23,42,.45);
+    }
+
+    .i2v-upload-label {
+      color: #dbeafe !important;
+      font-size: 11px !important;
+      font-weight: 700;
+      line-height: 1.45 !important;
+    }
+
+    .i2v-upload-label::after {
+      content: 'PNG/JPG/WebP';
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 9.5px;
+      font-weight: 500;
+    }
+
+    .i2v-preview-img {
+      height: 112px !important;
+      border-radius: 10px !important;
+    }
+
+    .i2v-pair-text {
+      padding: 12px 13px !important;
+      max-height: 132px !important;
+      align-self: stretch;
+      border-left: 1px solid rgba(51,65,85,.72);
+    }
+
+    @media (max-width: 520px) {
+      .i2v-pair-body {
+        grid-template-columns: 1fr;
+      }
+      .i2v-pair-text {
+        border-left: 0;
+        border-top: 1px solid rgba(51,65,85,.72);
+      }
+    }
+
+    @media (max-width: 760px) {
+      .tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
   </style>
 </head>
 
@@ -1480,90 +2467,105 @@
 
   <!-- TABS -->
   <div class="tabs">
-    <div class="tab active" data-tab="inject">⚡ Video</div>
-    <div class="tab" data-tab="image">🖼 Ảnh</div>
-    <div class="tab" data-tab="img2vid">🖼→🎬</div>
-    <div class="tab" data-tab="shortfilm">🎬 Film</div>
-    <div class="tab" data-tab="downloads">⬇</div>
-    <div class="tab" data-tab="settings">⚙</div>
+    <div class="tab feature-tab active" data-tab="inject">
+      <span class="feature-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 6h8M5 10h10M5 14h7"/><path d="M16 6l4 3-4 3V6z"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg></span>
+      <span class="feature-tab-text">Văn bản thành Video</span>
+    </div>
+    <div class="tab feature-tab" data-tab="img2vid">
+      <span class="feature-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="9" height="14" rx="2"/><path d="M15 9l5 3-5 3V9z"/></svg></span>
+      <span class="feature-tab-text">Hình ảnh thành Video</span>
+    </div>
+    <div class="tab feature-tab" data-tab="shortfilm">
+      <span class="feature-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M7 4l2 6M13 4l2 6"/><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9 14h6"/></svg></span>
+      <span class="feature-tab-text">Film</span>
+    </div>
+    <div class="tab feature-tab" data-tab="image">
+      <span class="feature-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 15l3-3 3 3 2-2 3 3"/><path d="M8 8h6"/></svg></span>
+      <span class="feature-tab-text">Văn bản thành Hình ảnh</span>
+    </div>
+    <div class="tab" data-tab="downloads"><span class="tab-title">Tải xuống</span></div>
+    <div class="tab" data-tab="settings"><span class="tab-title">Cài đặt</span></div>
   </div>
-
   <div class="body">
 
     <!-- ── TAB: TẠO VIDEO ── -->
     <div class="tab-pane active" id="tab-inject">
-
-      <div>
-        <div class="sec-label">📝 Danh sách Prompt Video <span
-            style="text-transform:none;font-weight:400;color:var(--dimmed)">— cách 1 dòng trống = 1 prompt</span></div>
-        <textarea id="prompts-input" style="height:300px" placeholder="Prompt video 1: A girl standing on a hill...
+        <section class="video-main-panel">
+          <div>
+            <div class="sec-label">Danh sách Prompt Video <span
+                style="text-transform:none;font-weight:400;color:var(--dimmed)">— cách 1 dòng trống = 1 prompt</span></div>
+            <textarea id="prompts-input" style="height:300px" placeholder="Prompt video 1: A girl standing on a hill...
 
 Prompt video 2: A cat sleeping on a sofa...
 
 Prompt video 3: City at night..."></textarea>
-        <div class="prompt-meta">
-          <span>Tổng: <strong id="count-display">0</strong> prompt</span>
-          <span id="char-count" style="color:var(--dimmed)">0 ký tự</span>
-        </div>
-        <div class="queue-list" id="queue-list"></div>
-      </div>
-
-      <!-- Ratio -->
-      <div class="ratio-card">
-        <div class="sec-label" style="margin-bottom:8px">🎬 Tỉ lệ màn hình (áp dụng cho tất cả)</div>
-        <div class="ratio-pills" id="ratio-pills">
-          <div class="ratio-pill" data-ratio="16:9"><span class="ri">▬</span>16:9<span class="rs">YouTube</span></div>
-          <div class="ratio-pill active" data-ratio="9:16"><span class="ri">▮</span>9:16<span class="rs">Shorts</span>
+            <div class="prompt-meta">
+              <span>Tổng: <strong id="count-display">0</strong> prompt</span>
+              <span id="char-count" style="color:var(--dimmed)">0 ký tự</span>
+            </div>
           </div>
-          <div class="ratio-pill" data-ratio="1:1"><span class="ri">■</span>1:1<span class="rs">Vuông</span></div>
-          <div class="ratio-pill" data-ratio="2:3"><span class="ri">▮</span>2:3<span class="rs">Dọc</span></div>
-          <div class="ratio-pill" data-ratio="3:2"><span class="ri">▬</span>3:2<span class="rs">Ngang</span></div>
-        </div>
-      </div>
 
-      <!-- Settings -->
-      <div class="settings-grid">
-        <div class="setting-card">
-          <div class="sc-label">Delay giữa prompt (ms)</div>
-          <input type="number" id="delay-input" value="2000" min="500" max="30000" step="100" />
-        </div>
-        <div class="setting-card">
-          <div class="sc-label">Timeout tối đa (giây)</div>
-          <input type="number" id="timeout-input" value="300" min="60" max="1200" step="30" />
-        </div>
-      </div>
+          <div class="prompt-queue-panel" id="prompt-queue-panel">
+            <div class="prompt-queue-header">
+              <div class="prompt-queue-title">HÀNG ĐỢI PROMPT</div>
+              <div class="prompt-queue-count"><span id="queue-active-count">0</span> đang hoạt động</div>
+            </div>
+            <div class="prompt-queue-list queue-list" id="queue-list"></div>
+          </div>
 
-      <div class="card">
-        <div class="toggle-row">
-          <span>🚀 Tự submit</span>
-          <label class="toggle"><input type="checkbox" id="auto-submit" checked><span class="tog-slider"></span></label>
-        </div>
-        <div class="toggle-row">
-          <span>⬇ Tự tải khi xong</span>
-          <label class="toggle"><input type="checkbox" id="auto-download" checked><span
-              class="tog-slider"></span></label>
-        </div>
-        <div class="toggle-row">
-          <span>⏳ Chờ generate xong</span>
-          <label class="toggle"><input type="checkbox" id="wait-generate" checked><span
-              class="tog-slider"></span></label>
-        </div>
-      </div>
+          <div class="ratio-card hidden-setting-card" aria-hidden="true">
+            <div class="sec-label" style="margin-bottom:8px">Tỉ lệ màn hình</div>
+            <div class="ratio-pills" id="ratio-pills">
+              <div class="ratio-pill" data-ratio="16:9"><span class="ri">▬</span>16:9<span class="rs">YouTube</span></div>
+              <div class="ratio-pill active" data-ratio="9:16"><span class="ri">▮</span>9:16<span class="rs">Shorts</span></div>
+              <div class="ratio-pill" data-ratio="1:1"><span class="ri">■</span>1:1<span class="rs">Vuông</span></div>
+              <div class="ratio-pill" data-ratio="2:3"><span class="ri">▮</span>2:3<span class="rs">Dọc</span></div>
+              <div class="ratio-pill" data-ratio="3:2"><span class="ri">▬</span>3:2<span class="rs">Ngang</span></div>
+            </div>
+          </div>
 
-      <div class="btn-row">
-        <button class="btn btn-primary" id="run-btn">▶ Chạy</button>
-        <button class="btn btn-danger" id="stop-btn" disabled>■ Dừng</button>
-        <button class="btn btn-secondary" id="clear-btn">✕ Xóa</button>
-      </div>
+          <div class="settings-grid">
+            <div class="setting-card">
+              <div class="sc-label">Delay giữa prompt (ms)</div>
+              <input type="number" id="delay-input" value="2000" min="500" max="30000" step="100" />
+            </div>
+            <div class="setting-card">
+              <div class="sc-label">Timeout tối đa (giây)</div>
+              <input type="number" id="timeout-input" value="300" min="60" max="1200" step="30" />
+            </div>
+          </div>
 
-      <div class="progress-wrap" id="progress-wrap">
-        <div class="prog-bar-bg">
-          <div class="prog-bar" id="prog-bar"></div>
-        </div>
-        <div class="prog-label" id="prog-label">Đang chờ...</div>
-        <div class="log-box" id="log"></div>
-      </div>
+          <div class="card">
+            <div class="toggle-row">
+              <span>Tự submit</span>
+              <label class="toggle"><input type="checkbox" id="auto-submit" checked><span class="tog-slider"></span></label>
+            </div>
+            <div class="toggle-row">
+              <span>Tự tải khi xong</span>
+              <label class="toggle"><input type="checkbox" id="auto-download" checked><span
+                  class="tog-slider"></span></label>
+            </div>
+            <div class="toggle-row">
+              <span>Chờ generate xong</span>
+              <label class="toggle"><input type="checkbox" id="wait-generate" checked><span
+                  class="tog-slider"></span></label>
+            </div>
+          </div>
 
+          <div class="btn-row">
+            <button class="btn btn-primary" id="run-btn">Chạy</button>
+            <button class="btn btn-danger" id="stop-btn" disabled>Dừng</button>
+            <button class="btn btn-secondary" id="clear-btn">Xóa</button>
+          </div>
+
+          <div class="progress-wrap" id="progress-wrap">
+            <div class="prog-bar-bg">
+              <div class="prog-bar" id="prog-bar"></div>
+            </div>
+            <div class="prog-label" id="prog-label">Đang chờ...</div>
+            <div class="log-box" id="log"></div>
+          </div>
+        </section>
     </div><!-- /tab-inject -->
 
     <!-- ── TAB: TẠO ẢNH ── -->
@@ -1580,16 +2582,22 @@ A cute puppy playing in a garden"></textarea>
           <span>Tổng: <strong id="img-count-display">0</strong> ảnh</span>
           <span id="img-char-count" style="color:var(--dimmed)">0 ký tự</span>
         </div>
-        <div class="img-queue-list" id="img-queue-list"></div>
+        <div class="img-queue-panel">
+          <div class="img-queue-header">
+            <div class="img-queue-title">HÀNG ĐỢI ẢNH</div>
+            <div class="img-queue-count"><span id="img-queue-count">0</span> ảnh</div>
+          </div>
+          <div class="img-queue-list" id="img-queue-list"></div>
+        </div>
       </div>
 
       <!-- Ratio for image -->
-      <div class="ratio-card">
+      <div class="ratio-card feature-local-ratio" aria-hidden="true">
         <div class="sec-label" style="margin-bottom:8px">📐 Tỉ lệ ảnh</div>
         <div class="ratio-pills" id="img-ratio-pills">
           <div class="ratio-pill" data-ratio="16:9"><span class="ri">▬</span>16:9<span class="rs">Ngang</span></div>
-          <div class="ratio-pill" data-ratio="9:16"><span class="ri">▮</span>9:16<span class="rs">Dọc</span></div>
-          <div class="ratio-pill active" data-ratio="1:1"><span class="ri">■</span>1:1<span class="rs">Vuông</span>
+          <div class="ratio-pill active" data-ratio="9:16"><span class="ri">▮</span>9:16<span class="rs">Dọc</span></div>
+          <div class="ratio-pill" data-ratio="1:1"><span class="ri">■</span>1:1<span class="rs">Vuông</span>
           </div>
           <div class="ratio-pill" data-ratio="2:3"><span class="ri">▮</span>2:3<span class="rs">Portrait</span></div>
           <div class="ratio-pill" data-ratio="3:2"><span class="ri">▬</span>3:2<span class="rs">Landscape</span></div>
@@ -1606,6 +2614,18 @@ A cute puppy playing in a garden"></textarea>
           <span>⏳ Chờ generate xong</span>
           <label class="toggle"><input type="checkbox" id="img-wait-generate" checked><span
               class="tog-slider"></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="toggle-row">
+          <span>Số ảnh mỗi prompt</span>
+          <select id="img-output-count" class="sf-select" style="width:72px;flex:0 0 72px">
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
         </div>
       </div>
 
@@ -1648,34 +2668,16 @@ A cat sleeping on a sofa, afternoon light..."></textarea>
       </div>
 
       <div class="i2v-parse-row">
-        <div class="i2v-parse-info" id="i2v-parse-info">Nhập prompt rồi nhấn "Tạo danh sách" ↓</div>
-        <button class="btn btn-blue" id="i2v-parse-btn" style="flex:0;padding:8px 14px;font-size:11.5px">Tạo danh sách
-          →</button>
+        <div class="i2v-parse-info" id="i2v-parse-info">Nhập prompt, cách 1 dòng để tự tạo scene tiếp theo ↓</div>
       </div>
 
       <div class="i2v-guard-banner" id="i2v-guard-banner"></div>
-      <div class="i2v-pairs" id="i2v-pairs"></div>
-
-      <!-- I2V Ratio -->
-      <div class="ratio-card" id="i2v-options" style="display:none">
-        <div class="sec-label" style="margin-bottom:8px">🎬 Tỉ lệ màn hình</div>
-        <div class="ratio-pills" id="i2v-ratio-pills">
-          <div class="ratio-pill" data-ratio="16:9"><span class="ri">▬</span>16:9<span class="rs">YouTube</span></div>
-          <div class="ratio-pill active" data-ratio="9:16"><span class="ri">▮</span>9:16<span class="rs">Shorts</span>
-          </div>
-          <div class="ratio-pill" data-ratio="1:1"><span class="ri">■</span>1:1<span class="rs">Vuông</span></div>
-          <div class="ratio-pill" data-ratio="2:3"><span class="ri">▮</span>2:3<span class="rs">Dọc</span></div>
-          <div class="ratio-pill" data-ratio="3:2"><span class="ri">▬</span>3:2<span class="rs">Ngang</span></div>
+      <div class="i2v-queue-panel">
+        <div class="i2v-queue-header">
+          <div class="i2v-queue-title">HÀNG ĐỢI SCENE</div>
+          <div class="i2v-queue-count"><span id="i2v-queue-count">0</span> scene</div>
         </div>
-      </div>
-
-      <!-- I2V Duration -->
-      <div class="dur-card" id="i2v-dur-card" style="display:none">
-        <div class="sec-label" style="margin-bottom:8px">⏱ Thời lượng video</div>
-        <div class="dur-btns" id="i2v-dur-btns">
-          <div class="dur-btn active" data-dur="5">5s<small>Ngắn</small></div>
-          <div class="dur-btn" data-dur="10">10s<small>Dài</small></div>
-        </div>
+        <div class="i2v-pairs" id="i2v-pairs"></div>
       </div>
 
       <div class="card" id="i2v-toggle-opts" style="display:none">
@@ -1761,7 +2763,13 @@ A cat sleeping on a sofa, afternoon light..."></textarea>
         </div>
       </div>
 
-      <div class="sf-scene-list" id="sf-scene-list"></div>
+      <div class="scene-queue-panel">
+        <div class="scene-queue-header">
+          <div class="scene-queue-title">HÀNG ĐỢI CẢNH</div>
+          <div class="scene-queue-count"><span id="sf-scene-queue-count">0</span> cảnh</div>
+        </div>
+        <div class="sf-scene-list" id="sf-scene-list"></div>
+      </div>
       <button class="sf-add-btn" id="sf-add-scene-btn">＋ Thêm cảnh mới</button>
 
       <!-- 3. Guard -->
@@ -1832,31 +2840,92 @@ A cat sleeping on a sofa, afternoon light..."></textarea>
 
     <!-- ── TAB: SETTINGS ── -->
     <div class="tab-pane" id="tab-settings">
-      <div class="info-card">
-        <h3>📁 File lưu tải về</h3>
-        <p>File lưu vào <code>Downloads</code> của Chrome với tên:<br>
-          <code>grok_[loại]_[slug]_[timestamp].mp4/.jpg</code>
-        </p>
+
+      <!-- Mô hình hình ảnh -->
+      <div class="set-section">
+        <div class="set-section-title">🖼 Mô hình Hình ảnh</div>
+        <div class="set-row">
+          <div class="set-label">Chế độ tạo ảnh</div>
+          <div class="set-pills" id="set-img-model-pills">
+            <div class="set-pill active" data-val="speed">⚡ Tốc độ</div>
+            <div class="set-pill" data-val="quality">✨ Chất lượng</div>
+          </div>
+        </div>
       </div>
-      <div class="info-card">
-        <h3>🖼 Tạo Ảnh</h3>
-        <p>• Mỗi dòng = 1 prompt ảnh (không cần dòng trống)<br>
-          • Extension tự submit từng prompt và chờ ảnh xuất hiện<br>
-          • Có thể chọn tỉ lệ ảnh khác với tỉ lệ video</p>
+
+      <!-- Tỷ lệ khung hình mặc định -->
+      <div class="set-section">
+        <div class="set-section-title">📐 Tỷ lệ khung hình mặc định</div>
+        <div class="set-label" style="margin-bottom:7px">Áp dụng cho toàn bộ chức năng của extension</div>
+        <div class="ratio-pills" id="set-default-ratio-pills">
+          <div class="ratio-pill" data-ratio="16:9"><span class="ri">▬</span>16:9<span class="rs">YouTube</span></div>
+          <div class="ratio-pill active" data-ratio="9:16"><span class="ri">▮</span>9:16<span class="rs">Shorts/Reels</span></div>
+          <div class="ratio-pill" data-ratio="1:1"><span class="ri">■</span>1:1<span class="rs">Vuông</span></div>
+          <div class="ratio-pill" data-ratio="2:3"><span class="ri">▮</span>2:3<span class="rs">Dọc</span></div>
+          <div class="ratio-pill" data-ratio="3:2"><span class="ri">▬</span>3:2<span class="rs">Ngang</span></div>
+        </div>
       </div>
-      <div class="info-card">
-        <h3>⚡ Thời lượng video</h3>
-        <p>• Chọn <strong>5s</strong> hoặc <strong>10s</strong> ở từng prompt trong hàng đợi<br>
-          • Extension tự click vào selector thời lượng trên Grok<br>
-          • Progress bar sync theo trạng thái thực tế của Grok</p>
+
+      <!-- Tùy chọn video mặc định -->
+      <div class="set-section">
+        <div class="set-section-title">⏱ Tùy chọn Video mặc định</div>
+        <div class="set-row">
+          <div class="set-label">Thời lượng video</div>
+          <div class="set-pills" id="set-default-dur-pills">
+            <div class="set-pill" data-val="5">6 giây</div>
+            <div class="set-pill active" data-val="10">10 giây</div>
+          </div>
+        </div>
       </div>
-      <div class="info-card">
-        <h3>⚠ Lưu ý</h3>
-        <p>• Mở <code>grok.com</code> → vào <strong>Imagine</strong><br>
-          • Delay tối thiểu 1500ms tránh rate limit<br>
-          • Video mất 30–120 giây generate<br>
-          • Timeout tối đa là giới hạn an toàn, không phải tiến độ thực</p>
+
+      <!-- Số lần thử -->
+      <div class="set-section">
+        <div class="set-section-title">🔁 Số lần thử tối đa khi lỗi</div>
+        <div class="set-row">
+          <div class="set-label">Retry khi generate/download thất bại</div>
+          <div class="set-stepper">
+            <button class="set-step-btn" id="set-retry-minus">−</button>
+            <span class="set-step-val" id="set-retry-val">5</span>
+            <button class="set-step-btn" id="set-retry-plus">+</button>
+          </div>
+        </div>
       </div>
+
+      <!-- Chất lượng tải xuống -->
+      <div class="set-section">
+        <div class="set-section-title">⬇ Chất lượng tự động tải xuống</div>
+        <div class="set-row">
+          <div class="set-label">Video</div>
+          <div class="set-pills" id="set-dl-video-qual-pills">
+            <div class="set-pill" data-val="480p">480p</div>
+            <div class="set-pill active" data-val="720p">720p</div>
+          </div>
+        </div>
+        <div class="set-row" style="margin-top:8px">
+          <div class="set-label">Hình ảnh</div>
+          <div class="set-pills" id="set-dl-img-qual-pills">
+            <div class="set-pill" data-val="512">512</div>
+            <div class="set-pill active" data-val="1k">1k</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-action-row">
+        <button id="set-reset-default-btn" class="btn btn-secondary">↺ Mặc định</button>
+        <button id="set-save-global-btn" class="btn btn-primary">💾 Save</button>
+      </div>
+
+      <!-- Vị trí tải xuống -->
+      <div class="set-section">
+        <div class="set-section-title">📁 Vị trí tải xuống</div>
+        <div class="set-row">
+          <div class="set-label">Mở cài đặt thư mục lưu file<br><small style="color:var(--muted)">Thay đổi trong cài đặt trình duyệt</small></div>
+          <button class="set-dl-gear-btn" id="set-open-dl-settings" title="Mở cài đặt tải xuống">
+            <span>⚙</span> Mở
+          </button>
+        </div>
+      </div>
+
     </div>
 
   </div><!-- /body -->
@@ -1866,8 +2935,21 @@ A cat sleeping on a sofa, afternoon light..."></textarea>
     <span>Grok Injector v3.1</span>
     <span id="footer-dl-count">0 file đã tải</span>
   </div>
-  <script src="shortfilm-logic.js"></script>
-  <script src="sidepanel.js"></script>
+  <!-- NOT-ON-GROK OVERLAY -->
+  <div id="grok-guard-overlay">
+    <div class="ggo-box">
+      <div class="ggo-icon">🔒</div>
+      <div class="ggo-title">Không ở trang Grok</div>
+      <div class="ggo-desc">
+        Công cụ Grok Automation chỉ hoạt động khi bạn đang ở trang
+        <strong>imagine</strong> của <strong>grok.com</strong>
+      </div>
+      <button id="ggo-goto-btn">Đi đến Grok →</button>
+    </div>
+  </div>
+
+  <script src="shortfilm-logic.js" charset="UTF-8"></script>
+  <script src="sidepanel.js" charset="UTF-8"></script>
 </body>
 
 </html>
